@@ -1,0 +1,28 @@
+{
+  "name": "velament",
+  "private": true,
+  "workspaces": [
+    "shared",
+    "velament-backend",
+    "velament-frontend"
+  ],
+  "scripts": {
+    "dev": "npm run build -w @velament/shared && concurrently -k \"npm run dev -w @velament/shared\" \"npm run dev -w @velament/backend\" \"npm run dev -w @velament/frontend\"",
+    "build": "npm run build -w @velament/shared && npm run build -w @velament/backend && npm run build -w @velament/frontend",
+    "typecheck": "npm run build -w @velament/shared && npm run typecheck --workspaces --if-present",
+    "test": "npm run build -w @velament/shared && npm run test --workspaces --if-present",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "db:up": "docker compose up -d --wait",
+    "db:down": "docker compose down",
+    "check": "npm run format:check && npm run typecheck && npm test && npm run build"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "devDependencies": {
+    "concurrently": "^9.2.0",
+    "prettier": "^3.6.0",
+    "typescript": "^5.9.0"
+  }
+}

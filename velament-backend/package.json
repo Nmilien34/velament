@@ -1,0 +1,35 @@
+{
+  "name": "@velament/backend",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/server.ts",
+    "build": "tsc",
+    "start": "node dist/server.js",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "session:create": "tsx src/scripts/create-session.ts"
+  },
+  "dependencies": {
+    "@velament/shared": "*",
+    "cors": "^2.8.5",
+    "dotenv": "^17.2.0",
+    "express": "^5.1.0",
+    "google-auth-library": "^11.0.2",
+    "helmet": "^8.1.0",
+    "mongoose": "^8.19.0",
+    "openai": "^7.15.0",
+    "typescript": "^5.9.0",
+    "zod": "^4.1.0"
+  },
+  "devDependencies": {
+    "@types/cors": "^2.8.19",
+    "@types/express": "^5.0.0",
+    "@types/node": "^22.0.0",
+    "@types/supertest": "^6.0.0",
+    "supertest": "^7.1.0",
+    "tsx": "^4.20.0",
+    "vitest": "^5.0.0"
+  }
+}

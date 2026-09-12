@@ -1,0 +1,23 @@
+body {
+  margin: 0;
+  background: #080808;
+  color: #eee;
+  font-family: Arial, sans-serif;
+}
+main {
+  max-width: 900px;
+  margin: 18vh auto;
+  padding: 24px;
+}
+small {
+  font-family: monospace;
+  letter-spacing: 0.15em;
+  color: #888;
+}
+h1 {
+  font-size: 64px;
+  letter-spacing: -3px;
+}
+p {
+  color: #999;
+}
