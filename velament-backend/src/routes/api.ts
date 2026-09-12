@@ -1,5 +1,7 @@
+import { rateLimit } from "../middleware/rate-limit.js";
 import {
   projectStatus,
+  refreshProjectConnection,
   listBranches,
 } from "../services/project-status.service.js";
 import { retryAnalysis } from "../services/job.service.js";
@@ -39,6 +41,16 @@ import { revision } from "../services/project.service.js";
 import { HttpError } from "../utils/errors.js";
 export const api = Router();
 api.use(authenticate);
+api.use(rateLimit("api-read-write", 120, 60000));
+api.use((req, res, next) => {
+  if (
+    ["GET", "HEAD", "OPTIONS"].includes(req.method) ||
+    /\/(cancel|refresh)$/.test(req.path)
+  )
+    return next();
+  return rateLimit("api-mutations", 60, 3600000)(req, res, next);
+});
+
 api.get("/projects", listProjects);
 api.post("/projects", createProject);
 api.post("/projects/:projectId/restore", async (req, res) => {
@@ -569,4 +581,8 @@ api.post("/projects/:projectId/jobs/:id/retry", async (req, res) => {
       requestedBranch: job.requestedBranch,
     },
   });
+});
+
+api.post("/projects/:projectId/connection/refresh", async (req, res) => {
+  res.json({ data: await refreshProjectConnection(res.locals.projectId) });
 });

@@ -63,7 +63,14 @@ describe.skipIf(!uri)("durable analysis jobs", () => {
     );
     vi.mocked(analyze).mockResolvedValue(null);
     await processNextJob();
-    expect(analyze).toHaveBeenCalledWith(projectId, "main");
+    expect(analyze).toHaveBeenCalledWith(
+      projectId,
+      "main",
+      expect.objectContaining({
+        id: expect.any(String),
+        leaseToken: expect.any(String),
+      }),
+    );
   });
   it("retries failed analysis on its original branch and rejects duplicate retries", async () => {
     const job = await enqueueAnalysis(projectId, "retry-test");
@@ -116,5 +123,60 @@ describe.skipIf(!uri)("durable analysis jobs", () => {
     );
     await processNextJob();
     expect((await Job.findById(job!.id))!.status).toBe("failed");
+  });
+  it("marks only removed repositories unavailable", async () => {
+    await Project.updateOne(
+      { _id: projectId },
+      {
+        $set: {
+          installationId: 42,
+          repositoryId: 10,
+          connectionState: "active",
+        },
+      },
+    );
+    const other = await Project.create({
+      userId: new mongoose.Types.ObjectId(),
+      owner: "acme",
+      repo: "other",
+      branch: "main",
+      installationId: 42,
+      repositoryId: 11,
+      connectionState: "active",
+    });
+    await Job.create({
+      key: "webhook:removed",
+      kind: "webhook",
+      payload: {
+        event: "installation_repositories",
+        body: {
+          action: "removed",
+          installation: { id: 42 },
+          repositories_removed: [{ id: 10 }],
+        },
+      },
+    });
+    await processNextJob();
+    expect((await Project.findById(projectId))?.connectionState).toBe(
+      "unavailable",
+    );
+    expect((await Project.findById(other.id))?.connectionState).toBe("active");
+    expect(await Project.exists({ _id: projectId })).toBeTruthy();
+  });
+  it("settles an exhausted interrupted lease without claiming it again", async () => {
+    const job = await Job.create({
+      key: "exhausted",
+      kind: "analysis",
+      projectId,
+      status: "running",
+      attempts: 3,
+      leaseUntil: new Date(0),
+      leaseToken: "old",
+    });
+    await processNextJob();
+    const saved = await Job.findById(job.id);
+    expect(saved?.status).toBe("failed");
+    expect(saved?.errorCode).toBe("WORKER_INTERRUPTED");
+    expect(saved?.leaseToken).toBeUndefined();
   });
 });

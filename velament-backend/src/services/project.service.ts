@@ -1,3 +1,5 @@
+import mongoose from "mongoose";
+import { Job } from "../models/Job.js";
 import { randomUUID } from "node:crypto";
 import { repositoryToken } from "./github-app.service.js";
 import { Project } from "../models/Project.js";
@@ -19,7 +21,11 @@ export async function revision(projectId: string, id: string) {
   if (!r) throw new HttpError(404, "NOT_FOUND", "Revision not found");
   return r;
 }
-export async function analyze(projectId: string, requestedBranch: string) {
+export async function analyze(
+  projectId: string,
+  requestedBranch: string,
+  jobScope?: { id: string; leaseToken: string },
+) {
   const now = new Date(),
     lockToken = randomUUID();
   const lock = await Project.findOneAndUpdate(
@@ -74,30 +80,63 @@ export async function analyze(projectId: string, requestedBranch: string) {
       requestedBranch,
       token,
     );
-    const ownsLease = await Project.exists({
-      _id: projectId,
-      analysisLockToken: lockToken,
-      analysisLockedUntil: { $gt: new Date() },
-      archivedAt: null,
-    });
-    if (!ownsLease)
+    const edges = buildEdges(snapshot.files);
+    if (Buffer.byteLength(JSON.stringify({ ...snapshot, edges })) > 8000000)
       throw new HttpError(
-        409,
-        "ANALYSIS_LEASE_LOST",
-        "Analysis lease expired or was replaced. Retry the job",
+        422,
+        "SNAPSHOT_TOO_LARGE",
+        "Snapshot and graph exceed the storage budget",
       );
-    return await Revision.findOneAndUpdate(
-      { projectId, sha: snapshot.sha },
-      {
-        $setOnInsert: {
-          projectId,
-          branch: requestedBranch,
-          ...snapshot,
-          edges: buildEdges(snapshot.files),
+    return await mongoose.connection.transaction(async (session) => {
+      const ownsLease = await Project.findOneAndUpdate(
+        {
+          _id: projectId,
+          analysisLockToken: lockToken,
+          connectionState: { $ne: "unavailable" },
+          archivedAt: null,
+          analysisLockedUntil: { $gt: new Date() },
         },
-      },
-      { upsert: true, new: true, runValidators: true },
-    );
+        { $unset: { analysisLockedUntil: 1, analysisLockToken: 1 } },
+        { session },
+      );
+      if (!ownsLease)
+        throw new HttpError(
+          409,
+          "ANALYSIS_LEASE_LOST",
+          "Analysis access or lease changed. Retry the job",
+        );
+      if (jobScope) {
+        const job = await Job.updateOne(
+          {
+            _id: jobScope.id,
+            projectId,
+            leaseToken: jobScope.leaseToken,
+            status: "running",
+            cancelRequested: false,
+          },
+          { $set: { leaseUntil: new Date(Date.now() + 1200000) } },
+          { session },
+        );
+        if (!job.matchedCount)
+          throw new HttpError(
+            409,
+            "ANALYSIS_CANCELLED",
+            "Analysis cancelled or superseded",
+          );
+      }
+      return Revision.findOneAndUpdate(
+        { projectId, sha: snapshot.sha },
+        {
+          $setOnInsert: {
+            projectId,
+            branch: requestedBranch,
+            ...snapshot,
+            edges,
+          },
+        },
+        { upsert: true, new: true, runValidators: true, session },
+      );
+    });
   } finally {
     await Project.updateOne(
       { _id: projectId, analysisLockToken: lockToken },

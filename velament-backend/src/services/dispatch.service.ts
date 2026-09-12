@@ -61,17 +61,31 @@ export async function dispatch(projectId: string, key: string, body: unknown) {
       "REVISION_MOVED",
       "Branch changed. Review the current revision before running",
     );
-  const record = await Dispatch.create({
-    projectId,
-    key,
-    requestHash,
-    workflowId: input.workflowId,
-    ref: input.ref,
-    sha: input.sha,
-  });
+  let record;
+  try {
+    record = await Dispatch.create({
+      projectId,
+      key,
+      requestHash,
+      workflowId: input.workflowId,
+      ref: input.ref,
+      sha: input.sha,
+    });
+  } catch (error) {
+    if ((error as { code?: number }).code !== 11000) throw error;
+    const winner = await Dispatch.findOne({ projectId, key });
+    if (!winner || winner.requestHash !== requestHash)
+      throw new HttpError(
+        409,
+        "IDEMPOTENCY_CONFLICT",
+        "Key was used for a different request",
+      );
+    return winner;
+  }
+
   try {
     const result = z
-      .object({ workflow_run_id: z.number().optional() })
+      .object({ workflow_run_id: z.number().int().positive() })
       .parse(
         await githubRequest(
           base +
@@ -94,6 +108,15 @@ export async function dispatch(projectId: string, key: string, body: unknown) {
 }
 
 export async function refreshDispatch(projectId: string, dispatchId: string) {
+  await Dispatch.updateOne(
+    {
+      _id: dispatchId,
+      projectId,
+      status: "pending",
+      createdAt: { $lte: new Date(Date.now() - 120000) },
+    },
+    { $set: { status: "unknown", errorCode: "DISPATCH_UNCERTAIN" } },
+  );
   const record = await Dispatch.findOne({ _id: dispatchId, projectId });
   if (!record) throw new HttpError(404, "NOT_FOUND", "Dispatch not found");
   if (!record.githubRunId)

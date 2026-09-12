@@ -35,6 +35,9 @@ async function webhook(payload: unknown, deliveryKey: string) {
         sender: z.object({ id: z.number() }).optional(),
         installation: z.object({ id: z.number() }).optional(),
         repository: z.object({ id: z.number() }).optional(),
+        repositories_removed: z
+          .array(z.object({ id: z.number().int().positive() }))
+          .optional(),
         ref: z.string().optional(),
         workflow_run: z.object({ id: z.number() }).optional(),
       }),
@@ -49,6 +52,19 @@ async function webhook(payload: unknown, deliveryKey: string) {
     return;
   }
   if (!p.body.installation) return;
+  if (p.event === "installation_repositories" && p.body.action === "removed") {
+    await Project.updateMany(
+      {
+        installationId: p.body.installation.id,
+        repositoryId: {
+          $in: (p.body.repositories_removed ?? []).map((r) => r.id),
+        },
+        archivedAt: null,
+      },
+      { $set: { connectionState: "unavailable" } },
+    );
+    return;
+  }
   const projects = await Project.find({
     installationId: p.body.installation.id,
     archivedAt: null,
@@ -91,6 +107,17 @@ async function webhook(payload: unknown, deliveryKey: string) {
   }
 }
 export async function processNextJob() {
+  await Job.updateMany(
+    {
+      status: "running",
+      attempts: { $gte: 3 },
+      leaseUntil: { $lt: new Date() },
+    },
+    {
+      $set: { status: "failed", errorCode: "WORKER_INTERRUPTED" },
+      $unset: { leaseUntil: 1, leaseToken: 1 },
+    },
+  );
   const now = new Date();
   const leaseToken = randomUUID();
   const job = await Job.findOneAndUpdate(
@@ -134,6 +161,7 @@ export async function processNextJob() {
       const result = await analyze(
         job.projectId!.toString(),
         job.requestedBranch,
+        { id: job.id, leaseToken },
       );
       resultId = result?.id;
     } else await webhook(job.payload, job.key);
@@ -157,6 +185,7 @@ export async function processNextJob() {
         referenceId: resultId,
       });
   } catch (error) {
+    const cancelled = await Job.exists({ _id: job.id, cancelRequested: true });
     const terminal =
       job.attempts >= 3 ||
       (error instanceof HttpError &&
@@ -165,7 +194,7 @@ export async function processNextJob() {
       { _id: job.id, leaseToken },
       {
         $set: {
-          status: terminal ? "failed" : "queued",
+          status: cancelled ? "cancelled" : terminal ? "failed" : "queued",
           errorCode: error instanceof HttpError ? error.code : "JOB_FAILED",
           availableAt: new Date(Date.now() + 60000),
         },

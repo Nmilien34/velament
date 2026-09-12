@@ -30,3 +30,12 @@ Automated tests cover randomized authenticated encryption, tamper rejection, den
 - https://docs.github.com/en/apps/creating-github-apps/authenticating-with-a-github-app/generating-a-user-access-token-for-a-github-app
 - https://docs.github.com/en/apps/creating-github-apps/authenticating-with-a-github-app/generating-an-installation-access-token-for-a-github-app
 - https://docs.github.com/en/apps/oauth-apps/building-oauth-apps/differences-between-github-apps-and-oauth-apps
+
+Dispatch acceptance requires a positive provider run ID from the configured
+2026-03-10 API. Missing IDs are marked uncertain rather than accepted. Refreshing
+pending submissions older than two minutes marks them uncertain without submitting
+again. A delayed authoritative response may still supply the original run ID.
+
+## Onboarding connection status
+
+`GET /api/github/connection` requires a session and returns `status` (`disconnected`, `connected`, or `reconnect-required`), `githubUserId` (nullable), and `access: not-checked`. Connected means saved credentials are unexpired or refreshable; it does not verify GitHub availability or repository permissions. No tokens are returned. Responses are not cached. Use installation/repository listing to verify access before choosing a project.

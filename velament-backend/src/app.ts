@@ -1,3 +1,4 @@
+import { operations } from "./routes/operations.js";
 import { checkReadiness } from "./services/readiness.service.js";
 import { auth } from "./routes/auth.js";
 import { account } from "./routes/account.js";
@@ -37,6 +38,7 @@ export function createApp(origin: string) {
       .status(body.status === "ready" ? 200 : 503)
       .json(body);
   });
+  app.use("/internal", operations);
   app.use("/api/auth", auth);
   app.use("/api/github", github);
   app.use("/api", account);

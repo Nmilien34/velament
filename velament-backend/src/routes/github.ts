@@ -1,3 +1,5 @@
+import { Project } from "../models/Project.js";
+import { Job } from "../models/Job.js";
 import { rateLimit } from "../middleware/rate-limit.js";
 import { cookieOptions, readCookie } from "../utils/cookies.js";
 import { Router } from "express";
@@ -48,7 +50,11 @@ github.post(
 );
 github.get("/callback", async (req, res) => {
   const input = z
-    .object({ state: z.string().min(1), code: z.string().min(1) })
+    .object({
+      state: z.string().min(1).max(200),
+      code: z.string().min(1).max(2000).optional(),
+      error: z.string().max(200).optional(),
+    })
     .parse(req.query);
   const browser = readCookie(req, linkCookie());
   if (!browser)
@@ -69,6 +75,18 @@ github.get("/callback", async (req, res) => {
       "Connection expired or already used. Start again",
     );
   res.clearCookie(linkCookie(), cookieOptions());
+  if (input.error)
+    throw new HttpError(
+      400,
+      "GITHUB_CONNECTION_CANCELLED",
+      "GitHub connection was not authorized. You can try again",
+    );
+  if (!input.code)
+    throw new HttpError(
+      400,
+      "INVALID_OAUTH_CODE",
+      "Authorization code missing. Start again",
+    );
   const config = appConfig();
   const response = await fetch("https://github.com/login/oauth/access_token", {
     method: "POST",
@@ -170,9 +188,47 @@ github.get(
     res.json({ data: await repositories(res.locals.userId, id, page) });
   },
 );
+github.get("/connection", authenticate, async (_req, res) => {
+  const connection = await GitHubConnection.findOne({
+    userId: res.locals.userId,
+  }).select("githubUserId expiresAt refreshExpiresAt +refreshToken");
+  const now = Date.now();
+  const usable =
+    connection &&
+    (connection.expiresAt.getTime() > now ||
+      (connection.refreshToken &&
+        connection.refreshExpiresAt &&
+        connection.refreshExpiresAt.getTime() > now));
+  res.json({
+    data: {
+      status: !connection
+        ? "disconnected"
+        : usable
+          ? "connected"
+          : "reconnect-required",
+      githubUserId: connection?.githubUserId ?? null,
+      access: "not-checked",
+    },
+  });
+});
 github.delete("/connection", authenticate, async (_req, res) => {
   await GitHubConnection.deleteOne({ userId: res.locals.userId });
   await GitHubState.deleteMany({ userId: res.locals.userId });
+  await Project.updateMany(
+    { userId: res.locals.userId },
+    { $set: { connectionState: "unavailable" } },
+  );
+  const projects = await Project.find({ userId: res.locals.userId }).select(
+    "_id",
+  );
+  await Job.updateMany(
+    {
+      projectId: { $in: projects.map((project) => project._id) },
+      kind: "analysis",
+      status: { $in: ["queued", "running"] },
+    },
+    { $set: { cancelRequested: true } },
+  );
   res.sendStatus(204);
 });
 

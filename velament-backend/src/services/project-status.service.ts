@@ -81,3 +81,53 @@ export async function listBranches(projectId: string, page: number) {
     mayHaveMore: result.length === 100,
   };
 }
+
+export async function refreshProjectConnection(projectId: string) {
+  const p = await Project.findOne({ _id: projectId, archivedAt: null });
+  if (!p) throw new HttpError(404, "NOT_FOUND", "Project not found");
+  if (!p.installationId || !p.repositoryId)
+    throw new HttpError(
+      409,
+      "GITHUB_CONNECTION_REQUIRED",
+      "Connect this project",
+    );
+  const token = await repositoryToken(
+    p.userId.toString(),
+    p.installationId,
+    p.repositoryId,
+  );
+  const remote = z
+    .object({ id: z.number() })
+    .parse(
+      await githubRequest(
+        "/repos/" +
+          encodeURIComponent(p.owner) +
+          "/" +
+          encodeURIComponent(p.repo),
+        token,
+      ),
+    );
+  if (remote.id !== p.repositoryId)
+    throw new HttpError(
+      409,
+      "REPOSITORY_IDENTITY_CHANGED",
+      "Reconnect the project",
+    );
+  const result = await Project.updateOne(
+    {
+      _id: projectId,
+      archivedAt: null,
+      installationId: p.installationId,
+      repositoryId: p.repositoryId,
+      updatedAt: p.updatedAt,
+    },
+    { $set: { connectionState: "active" } },
+  );
+  if (!result.matchedCount)
+    throw new HttpError(409, "PROJECT_CHANGED", "Refresh and retry");
+  return {
+    projectId,
+    connection: "verified" as const,
+    verifiedAt: new Date().toISOString(),
+  };
+}

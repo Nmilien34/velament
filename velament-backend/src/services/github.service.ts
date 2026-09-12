@@ -40,7 +40,7 @@ export async function readRepository(
     .parse(
       await githubGet(base + "/commits/" + encodeURIComponent(branch), token),
     );
-  const tree = z
+  let tree = z
     .object({
       truncated: z.boolean(),
       tree: z.array(
@@ -58,6 +58,39 @@ export async function readRepository(
         token,
       ),
     );
+  if (tree.truncated) {
+    // GitHub recommends fetching individual subtrees when recursion truncates.
+    const pending = [{ sha: commit.commit.tree.sha, prefix: "" }];
+    const entries: typeof tree.tree = [];
+    let requests = 0;
+    let incomplete = false;
+    while (pending.length && requests < 200 && entries.length < 100000) {
+      const current = pending.shift()!;
+      const subtree = z
+        .object({
+          truncated: z.boolean(),
+          tree: z.array(
+            z.object({
+              path: z.string(),
+              type: z.string(),
+              sha: z.string(),
+              size: z.number().optional(),
+            }),
+          ),
+        })
+        .parse(await githubGet(base + "/git/trees/" + current.sha, token));
+      requests++;
+      incomplete ||= subtree.truncated;
+      for (const entry of subtree.tree) {
+        const path = current.prefix + entry.path;
+        if (/(^|\/)(node_modules|dist|build|vendor)(\/|$)/.test(path)) continue;
+        if (entry.type === "tree")
+          pending.push({ sha: entry.sha, prefix: path + "/" });
+        else entries.push({ ...entry, path });
+      }
+    }
+    tree = { tree: entries, truncated: incomplete || pending.length > 0 };
+  }
   const candidates = tree.tree.filter(
     (f) =>
       f.type === "blob" &&
@@ -65,8 +98,9 @@ export async function readRepository(
       !/(^|\/)(node_modules|dist|build|vendor)\//.test(f.path),
   );
   const selected = candidates
-    .filter((f) => (f.size ?? Infinity) <= 50000)
-    .slice(0, 40);
+    .filter((f) => (f.size ?? Infinity) <= 100000)
+    .sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0))
+    .slice(0, 500);
   const files: SourceFile[] = [];
   let bytes = 0;
   for (const entry of selected) {
@@ -74,8 +108,9 @@ export async function readRepository(
       .object({ content: z.string(), encoding: z.literal("base64") })
       .parse(await githubGet(base + "/git/blobs/" + entry.sha, token));
     const content = Buffer.from(blob.content, "base64").toString("utf8");
-    bytes += Buffer.byteLength(content);
-    if (bytes > 2000000) break;
+    const size = Buffer.byteLength(content);
+    if (size > 100000 || bytes + size > 4000000) continue;
+    bytes += size;
     files.push({
       path: entry.path,
       content,
@@ -89,7 +124,7 @@ export async function readRepository(
   if (tree.truncated) limitations.push("GitHub tree was truncated.");
   if (candidates.length > files.length)
     limitations.push(
-      "Some files exceeded the 40-file / 50 KB per-file / 2 MB snapshot limits.",
+      "Some files exceeded the 500-file / 100 KB per-file / 4 MB snapshot limits.",
     );
   return {
     sha: commit.sha,

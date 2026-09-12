@@ -1,3 +1,4 @@
+import { Job } from "../src/models/Job.js";
 import { beforeAll, afterAll, describe, expect, it, vi } from "vitest";
 import mongoose from "mongoose";
 import { randomBytes } from "node:crypto";
@@ -69,5 +70,80 @@ describe.skipIf(!uri)("analysis lease ownership", () => {
     );
     expect(await Revision.countDocuments()).toBe(0);
     expect(readRepository).toHaveBeenCalledWith("acme", "app", "main", "token");
+  });
+  it("does not save a snapshot when access is removed during fetching", async () => {
+    const p = await Project.create({
+      userId: new mongoose.Types.ObjectId(),
+      owner: "acme",
+      repo: "disconnect",
+      branch: "main",
+      installationId: 1,
+      repositoryId: 2,
+    });
+    vi.mocked(readRepository).mockImplementation(async () => {
+      await Project.updateOne(
+        { _id: p.id },
+        { $set: { connectionState: "unavailable" } },
+      );
+      return {
+        sha: "b".repeat(40),
+        state: "empty" as const,
+        files: [],
+        limitations: [],
+      };
+    });
+    await expect(analyze(p.id, "main")).rejects.toMatchObject({
+      code: "ANALYSIS_LEASE_LOST",
+    });
+    expect(await Revision.countDocuments({ projectId: p.id })).toBe(0);
+    expect((await Project.findById(p.id))?.analysisLockToken).toBeUndefined();
+  });
+
+  it("commits a snapshot and releases the project lease atomically", async () => {
+    const p = await Project.create({
+      userId: new mongoose.Types.ObjectId(),
+      owner: "acme",
+      repo: "atomic",
+      branch: "main",
+      installationId: 1,
+      repositoryId: 2,
+    });
+    vi.mocked(readRepository).mockResolvedValue({
+      sha: "c".repeat(40),
+      state: "empty",
+      files: [],
+      limitations: [],
+    });
+    const result = await analyze(p.id, "main");
+    expect(result?.sha).toBe("c".repeat(40));
+    expect((await Project.findById(p.id))?.analysisLockToken).toBeUndefined();
+  });
+  it("rolls back a snapshot when its job is cancelled", async () => {
+    const p = await Project.create({
+      userId: new mongoose.Types.ObjectId(),
+      owner: "acme",
+      repo: "cancel-atomic",
+      branch: "main",
+      installationId: 1,
+      repositoryId: 2,
+    });
+    const job = await Job.create({
+      key: "atomic-cancel",
+      kind: "analysis",
+      projectId: p.id,
+      status: "running",
+      leaseToken: "lease",
+      cancelRequested: true,
+    });
+    vi.mocked(readRepository).mockResolvedValue({
+      sha: "d".repeat(40),
+      state: "empty",
+      files: [],
+      limitations: [],
+    });
+    await expect(
+      analyze(p.id, "main", { id: job.id, leaseToken: "lease" }),
+    ).rejects.toMatchObject({ code: "ANALYSIS_CANCELLED" });
+    expect(await Revision.countDocuments({ projectId: p.id })).toBe(0);
   });
 });

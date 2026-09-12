@@ -49,4 +49,17 @@ describe.skipIf(!uri)("repository authorization browser binding", () => {
     expect(fetchMock).not.toHaveBeenCalled();
     expect(await GitHubState.countDocuments()).toBe(1);
   });
+  it("handles cancellation once without contacting GitHub", async () => {
+    const res = await request(app)
+      .get("/api/github/callback")
+      .set("Cookie", "velament_github_link=" + browser)
+      .query({ state, error: "access_denied" });
+    expect(res.status).toBe(400);
+    expect(res.body.error.code).toBe("GITHUB_CONNECTION_CANCELLED");
+    expect(await GitHubState.countDocuments()).toBe(0);
+    expect(res.headers["set-cookie"].join("")).toContain(
+      "velament_github_link=;",
+    );
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
 });
