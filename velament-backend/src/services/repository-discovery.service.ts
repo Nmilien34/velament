@@ -1,3 +1,4 @@
+import { summarizeDiscovery } from "./discovery-summary.service.js";
 import { createHash } from "node:crypto";
 import type { SourceFile } from "@velament/shared";
 import { AiDiscovery } from "../models/AiDiscovery.js";
@@ -63,6 +64,7 @@ export async function repositoryDiscoveryProgress(
   });
   return {
     batches,
+    summary: summarizeDiscovery(batches, files),
     skipped: plan.skipped,
     snapshotFiles: files.length,
     analyzedFiles: batches
@@ -74,7 +76,7 @@ export async function repositoryDiscoveryProgress(
     verification: "unverified" as const,
     limitations: [
       "Coverage refers only to stored snapshot files, not the entire GitHub repository.",
-      "Candidates are batch-local hypotheses; cross-batch features are not merged or runtime verified.",
+      "Matching candidate names are grouped for display only; descriptions and references remain independent hypotheses, not semantic merges or runtime verification.",
       "Each batch requires an explicit request. Failed or interrupted batches require explicit retry; no source is automatically resent.",
     ],
   };
