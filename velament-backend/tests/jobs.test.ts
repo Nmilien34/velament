@@ -139,6 +139,30 @@ describe.skipIf(!uri)("durable analysis jobs", () => {
     await processNextJob();
     expect((await Job.findById(job!.id))!.status).toBe("failed");
   });
+  it("retries temporary unavailability but stops after three attempts", async () => {
+    const job = await enqueueAnalysis(projectId, "temporary-unavailable");
+    vi.mocked(analyze).mockRejectedValue(
+      new HttpError(503, "TEMPORARILY_UNAVAILABLE", "Retry later"),
+    );
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      await Job.updateOne(
+        { _id: job!.id },
+        { $set: { availableAt: new Date(0) } },
+      );
+      await processNextJob();
+      const saved = await Job.findById(job!.id);
+      expect(saved?.attempts).toBe(attempt);
+      expect(saved?.status).toBe(attempt === 3 ? "failed" : "queued");
+    }
+  });
+  it("does not retry missing GitHub configuration", async () => {
+    const job = await enqueueAnalysis(projectId, "missing-config");
+    vi.mocked(analyze).mockRejectedValue(
+      new HttpError(503, "GITHUB_NOT_CONFIGURED", "Configure GitHub"),
+    );
+    await processNextJob();
+    expect((await Job.findById(job!.id))?.status).toBe("failed");
+  });
   it("marks only removed repositories unavailable", async () => {
     await Project.updateOne(
       { _id: projectId },

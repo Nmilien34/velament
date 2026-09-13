@@ -206,7 +206,8 @@ export async function processNextJob(kind?: "analysis" | "webhook") {
     const terminal =
       job.attempts >= 3 ||
       (error instanceof HttpError &&
-        [400, 401, 403, 404, 422, 503].includes(error.status));
+        ([400, 401, 403, 404, 422].includes(error.status) ||
+          error.code === "GITHUB_NOT_CONFIGURED"));
     await Job.updateOne(
       { _id: job.id, leaseToken },
       {
