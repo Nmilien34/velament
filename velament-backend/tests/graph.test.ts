@@ -86,3 +86,29 @@ it("uses the closest config and rejects targets outside the snapshot root", () =
   ];
   expect(buildEdges(files).map((e) => e.to)).toEqual(["app/src/x.ts"]);
 });
+it("resolves relative config inheritance and refuses cycles", () => {
+  const config = {
+    path: "app/tsconfig.json",
+    hash: "c",
+    content: '{"extends":"../tsconfig.base.json"}',
+  };
+  const base = {
+    path: "tsconfig.base.json",
+    hash: "b",
+    content: '{"compilerOptions":{"paths":{"@/*":["src/*"]}}}',
+  };
+  const files = [
+    config,
+    base,
+    { path: "app/main.ts", hash: "m", content: "import '@/x';" },
+    { path: "src/x.ts", hash: "x", content: "export {};" },
+  ];
+  expect(buildEdges(files).map((e) => e.to)).toEqual(["src/x.ts"]);
+  expect(
+    buildEdges([
+      config,
+      { ...base, content: '{"extends":"./app/tsconfig.json"}' },
+      ...files.slice(2),
+    ]),
+  ).toEqual([]);
+});

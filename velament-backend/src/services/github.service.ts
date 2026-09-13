@@ -98,7 +98,7 @@ export async function readRepository(
     (f) =>
       f.type === "blob" &&
       (/\.(tsx?|jsx?|mts|cts|mjs|cjs)$/.test(f.path) ||
-        /(^|\/)(tsconfig|jsconfig)\.json$/.test(f.path)) &&
+        /(^|\/)(tsconfig|jsconfig)(\.[^/]+)?\.json$/.test(f.path)) &&
       !/(^|\/)(node_modules|dist|build|vendor)\//.test(f.path),
   );
   const selected = candidates
