@@ -167,4 +167,39 @@ describe.skipIf(!uri)("feature assessment flow", () => {
     expect(res.body.data.stale).toBe(true);
     expect(res.body.data.assessment.featureVersion).toBe(1);
   });
+  it("requires reassociation after a GitHub rerun", async () => {
+    const run = await TestRun.create({
+      projectId,
+      githubRunId: 100,
+      sha: "a".repeat(40),
+      name: "test",
+      status: "completed",
+      conclusion: "success",
+      runAttempt: 1,
+      url: "https://github.com/acme/app/actions/runs/100",
+    });
+    const url = base() + "/assessments/" + assessmentId;
+    let res = await request(app)
+      .put(url + "/verification")
+      .set(auth())
+      .send({ runId: run.id });
+    expect(res.body.data.runEvidence.selectedAttempt).toBe(1);
+    expect(res.body.data.runEvidence.stale).toBe(false);
+    await TestRun.updateOne(
+      { _id: run.id },
+      { $set: { runAttempt: 2, conclusion: "failure" } },
+    );
+    res = await request(app).get(url).set(auth());
+    expect(res.body.data.runEvidence.stale).toBe(true);
+    expect(res.body.data.runEvidence.selectedAttempt).toBe(1);
+    expect(res.body.data.runEvidence.featureVerification).toBe(
+      "not-established",
+    );
+    res = await request(app)
+      .put(url + "/verification")
+      .set(auth())
+      .send({ runId: run.id });
+    expect(res.body.data.runEvidence.selectedAttempt).toBe(2);
+    expect(res.body.data.runEvidence.stale).toBe(false);
+  });
 });

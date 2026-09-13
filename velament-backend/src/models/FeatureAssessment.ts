@@ -11,6 +11,7 @@ export const FeatureAssessment = model(
       requirement: { type: String, required: true },
       evidence: { type: Schema.Types.Mixed, required: true },
       testRunId: Schema.Types.ObjectId,
+      testRunAttempt: { type: Number, min: 1 },
     },
     { timestamps: true },
   ),

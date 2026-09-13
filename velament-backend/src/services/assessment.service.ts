@@ -66,6 +66,10 @@ export async function getAssessment(projectId: string, id: string) {
       ? {
           run,
           coverage: "user-associated",
+          selectedAttempt: assessment.testRunAttempt ?? null,
+          stale:
+            assessment.testRunAttempt == null ||
+            assessment.testRunAttempt !== (run.runAttempt ?? 1),
           featureVerification: "not-established",
         }
       : null,
@@ -91,6 +95,7 @@ export async function associateAssessmentRun(
       "Run must match this project and exact commit",
     );
   assessment.testRunId = run._id;
+  assessment.testRunAttempt = run.runAttempt ?? 1;
   await assessment.save();
   return getAssessment(projectId, id);
 }
