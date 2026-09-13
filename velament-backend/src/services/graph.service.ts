@@ -1,7 +1,9 @@
+import { aliasResolver } from "./alias.service.js";
 import ts from "typescript";
 import path from "node:path";
 import type { SourceFile, GraphEdge, TraceFrame } from "@velament/shared";
 export function buildEdges(files: SourceFile[]): GraphEdge[] {
+  const aliases = aliasResolver(files);
   const known = new Set(files.map((f) => f.path)),
     edges: GraphEdge[] = [];
   for (const file of files) {
@@ -28,10 +30,15 @@ export function buildEdges(files: SourceFile[]): GraphEdge[] {
         ts.isStringLiteral(node.arguments[0])
       )
         spec = node.arguments[0].text;
-      if (spec?.startsWith(".")) {
-        const base = path.posix.normalize(
-          path.posix.join(path.posix.dirname(file.path), spec),
-        );
+      for (const base of !spec
+        ? []
+        : spec.startsWith(".")
+          ? [
+              path.posix.normalize(
+                path.posix.join(path.posix.dirname(file.path), spec),
+              ),
+            ]
+          : aliases(file.path, spec)) {
         const stem = base.replace(/\.[cm]?jsx?$/, "");
         const target = [
           base,
@@ -52,7 +59,7 @@ export function buildEdges(files: SourceFile[]): GraphEdge[] {
             "/index.jsx",
           ].map((ext) => stem + ext),
         ].find((p) => known.has(p));
-        if (target)
+        if (target) {
           edges.push({
             from: file.path,
             to: target,
@@ -60,6 +67,8 @@ export function buildEdges(files: SourceFile[]): GraphEdge[] {
             line:
               ast.getLineAndCharacterOfPosition(node.getStart(ast)).line + 1,
           });
+          break;
+        }
       }
       ts.forEachChild(node, visit);
     };

@@ -43,3 +43,46 @@ it("keeps manual context distinct from trace evidence", () =>
   ));
 it("does not treat suffix filenames as exact matches", () =>
   expect(locateTrace("at /app/not-src/a.ts:2:1", files)).toEqual([]));
+it("resolves configured aliases against captured source", () => {
+  const source = [
+    {
+      path: "tsconfig.json",
+      hash: "c",
+      content: '{"compilerOptions":{"baseUrl":".","paths":{"@/*":["src/*"]}}}',
+    },
+    { path: "src/a.ts", hash: "a", content: "import '@/b';" },
+    { path: "src/b.ts", hash: "b", content: "export {};" },
+  ];
+  expect(buildEdges(source)).toEqual([
+    { from: "src/a.ts", to: "src/b.ts", kind: "import", line: 1 },
+  ]);
+  expect(
+    buildEdges([
+      {
+        ...source[0]!,
+        content:
+          '{"extends":"./base.json","compilerOptions":{"paths":{"@/*":["src/*"]}}}',
+      },
+      ...source.slice(1),
+    ]),
+  ).toEqual([]);
+});
+it("uses the closest config and rejects targets outside the snapshot root", () => {
+  const files = [
+    {
+      path: "tsconfig.json",
+      hash: "1",
+      content: '{"compilerOptions":{"paths":{"@/*":["root/*"]}}}',
+    },
+    {
+      path: "app/tsconfig.json",
+      hash: "2",
+      content:
+        '{"compilerOptions":{"paths":{"@/*":["src/*"],"bad":["../../escape"]}}}',
+    },
+    { path: "app/main.ts", hash: "3", content: "import '@/x'; import 'bad';" },
+    { path: "app/src/x.ts", hash: "4", content: "export {};" },
+    { path: "root/x.ts", hash: "5", content: "export {};" },
+  ];
+  expect(buildEdges(files).map((e) => e.to)).toEqual(["app/src/x.ts"]);
+});
