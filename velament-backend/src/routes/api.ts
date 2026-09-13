@@ -1,3 +1,4 @@
+import { listRunArtifacts } from "../services/artifact.service.js";
 import { requestDeletion } from "../services/deletion.service.js";
 import { rateLimit } from "../middleware/rate-limit.js";
 import {
@@ -698,3 +699,20 @@ api.post(
     });
   },
 );
+
+api.get("/projects/:projectId/runs/:id/artifacts", async (req, res) => {
+  const page = z.coerce
+    .number()
+    .int()
+    .min(1)
+    .max(100)
+    .default(1)
+    .parse(req.query.page);
+  res.json({
+    data: await listRunArtifacts(
+      res.locals.projectId,
+      objectId.parse(req.params.id),
+      page,
+    ),
+  });
+});
