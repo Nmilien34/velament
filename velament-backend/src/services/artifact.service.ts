@@ -1,3 +1,4 @@
+import { artifactDownloadUrl } from "./artifact-url.service.js";
 import { FeatureAssessment } from "../models/FeatureAssessment.js";
 import { accessGeneration } from "./access.service.js";
 import { boundedBody, readArtifactReport } from "./artifact-report.service.js";
@@ -126,22 +127,7 @@ export async function importArtifactReport(
       "ARTIFACT_UNAVAILABLE",
       "GitHub did not provide an artifact download",
     );
-  const url = new URL(response.headers.get("location") ?? "");
-  if (
-    url.protocol !== "https:" ||
-    url.username ||
-    url.password ||
-    (url.port && url.port !== "443") ||
-    !(
-      url.hostname.endsWith(".blob.core.windows.net") ||
-      url.hostname.endsWith(".actions.githubusercontent.com")
-    )
-  )
-    throw new HttpError(
-      502,
-      "ARTIFACT_UNAVAILABLE",
-      "Unsupported artifact storage host",
-    );
+  const url = artifactDownloadUrl(response.headers.get("location"));
   const bytes = await boundedBody(
     await fetch(url, { redirect: "error", signal: AbortSignal.timeout(15000) }),
   );
