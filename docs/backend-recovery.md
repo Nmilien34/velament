@@ -34,6 +34,8 @@ Provider backups are outside this transaction and expire under the separately co
 
 Protected `/internal/metrics` includes `deployment.commit` from `RENDER_GIT_COMMIT`, or null when unavailable. Compare it with the intended full Git commit before calling a release verified. A successful readiness response alone does not identify the deployed version.
 
+Set `OPERATIONS_EXPECTED_COMMIT` to the full 40-character release SHA when running the operations checker for deployment verification. A missing or mismatched deployed commit fails the check. Omit it for routine health monitoring, or update it with each release.
+
 Deletion metrics include pending requests and requests incomplete more than two hours after creation. Failed purges retry after a one-minute delay without blocking other due requests. Project and account deletion cancel queued analysis and signal running analysis while preserving its lease until it settles.
 
 Metrics now include worker heartbeat age, polling failures and stale pending dispatches. The checker also fails on terminal jobs rather than considering an empty queue sufficient. A polling failure remains observable until process restart; investigate it before restarting. Failed analysis jobs can use the existing retry route. After inspecting a failed webhook, an operator can POST /internal/jobs/:id/retry with {"retry":true} and the operations bearer token. This only accepts failed webhook jobs, preserves their delivery key, and never dispatches a test workflow.

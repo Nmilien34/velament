@@ -18,6 +18,7 @@ try {
   if (!response.ok) throw new Error("Metrics unavailable");
   const metrics = (await response.json()) as {
     data: {
+      deployment?: { commit: string | null };
       deletions: { pending: number; overdue: number };
       queue: {
         failed: number;
@@ -34,6 +35,17 @@ try {
     };
   };
   const q = metrics.data.queue;
+  const expected = process.env.OPERATIONS_EXPECTED_COMMIT;
+  if (
+    expected &&
+    (!/^[a-f0-9]{40}$/i.test(expected) ||
+      metrics.data.deployment?.commit?.toLowerCase() !== expected.toLowerCase())
+  ) {
+    console.error(
+      "Deployment verification failed: expected commit is invalid, missing from the deployment, or does not match.",
+    );
+    throw new Error("Deployment mismatch");
+  }
   if (
     q.failed > 0 ||
     !metrics.data.deletions ||
