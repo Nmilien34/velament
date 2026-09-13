@@ -2,6 +2,18 @@ import { fromBuffer } from "yauzl";
 import { testReportInput } from "@velament/shared";
 import { HttpError } from "../utils/errors.js";
 export async function readArtifactReport(zip: Buffer, runId: string) {
+  try {
+    return await parseArtifactReport(zip, runId);
+  } catch (error) {
+    if (error instanceof HttpError) throw error;
+    throw new HttpError(
+      422,
+      "INVALID_ARTIFACT_REPORT",
+      "Artifact must contain one valid velament-test-report.json within the report limits",
+    );
+  }
+}
+async function parseArtifactReport(zip: Buffer, runId: string) {
   if (zip.length > 2_000_000)
     throw new HttpError(422, "ARTIFACT_TOO_LARGE", "Artifact exceeds 2 MB");
   const text = await new Promise<string>((resolve, reject) => {
@@ -56,7 +68,11 @@ export async function readArtifactReport(zip: Buffer, runId: string) {
 }
 export async function boundedBody(response: Response) {
   if (!response.ok || !response.body)
-    throw new Error("Artifact download failed");
+    throw new HttpError(
+      502,
+      "ARTIFACT_UNAVAILABLE",
+      "Artifact download failed; retry later",
+    );
   const reader = response.body.getReader();
   const chunks: Uint8Array[] = [];
   let size = 0;
@@ -65,7 +81,8 @@ export async function boundedBody(response: Response) {
       const { done, value } = await reader.read();
       if (done) break;
       size += value.length;
-      if (size > 2_000_000) throw new Error("Artifact exceeds limit");
+      if (size > 2_000_000)
+        throw new HttpError(422, "ARTIFACT_TOO_LARGE", "Artifact exceeds 2 MB");
       chunks.push(value);
     }
     return Buffer.concat(chunks);

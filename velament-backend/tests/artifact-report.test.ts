@@ -34,3 +34,17 @@ it("limits downloaded bytes", async () => {
     boundedBody(new Response(new Uint8Array(2000001))),
   ).rejects.toThrow();
 });
+it("returns actionable errors for invalid archives and failed downloads", async () => {
+  await expect(
+    readArtifactReport(Buffer.from("invalid"), "a".repeat(24)),
+  ).rejects.toMatchObject({ status: 422, code: "INVALID_ARTIFACT_REPORT" });
+  await expect(
+    readArtifactReport(Buffer.from(fixtures.missing, "base64"), "a".repeat(24)),
+  ).rejects.toMatchObject({ status: 422, code: "INVALID_ARTIFACT_REPORT" });
+  await expect(
+    boundedBody(new Response(null, { status: 503 })),
+  ).rejects.toMatchObject({ status: 502, code: "ARTIFACT_UNAVAILABLE" });
+  await expect(
+    boundedBody(new Response(new Uint8Array(2000001))),
+  ).rejects.toMatchObject({ status: 422, code: "ARTIFACT_TOO_LARGE" });
+});
