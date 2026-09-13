@@ -241,6 +241,17 @@ describe.skipIf(!uri)("feature assessment flow", () => {
           .send({ ...body, tests: [body.tests[0], body.tests[0]] })
       ).status,
     ).toBe(400);
+    expect(saved.body.data.reportEvidence.staleReasons).toEqual([
+      "feature-changed",
+    ]);
+    await TestRun.updateOne(
+      { _id: run!.id },
+      { $set: { status: "in_progress" } },
+    );
+    const pending = (await request(app).get(url).set(auth())).body.data
+      .reportEvidence;
+    expect(pending.staleReasons).toContain("run-not-completed");
+    expect(pending.stale).toBe(true);
     await TestRun.updateOne({ _id: run!.id }, { $set: { runAttempt: 3 } });
     expect(
       (await request(app).get(url).set(auth())).body.data.reportEvidence.stale,

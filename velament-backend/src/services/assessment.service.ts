@@ -70,16 +70,28 @@ export async function getAssessment(projectId: string, id: string) {
         sha: assessment.sha,
       })
     : null;
+  const staleReasons: string[] = [];
+  if (report) {
+    if (!feature) staleReasons.push("feature-missing");
+    else {
+      if (feature.version !== assessment.featureVersion)
+        staleReasons.push("feature-changed");
+      if (feature.archivedAt) staleReasons.push("feature-archived");
+    }
+    if (!reportRun) staleReasons.push("run-missing");
+    else {
+      if (reportRun.runAttempt !== report.attempt)
+        staleReasons.push("run-attempt-changed");
+      if (reportRun.status !== "completed")
+        staleReasons.push("run-not-completed");
+    }
+  }
   return {
     reportEvidence: report
       ? {
           report,
-          stale:
-            !feature ||
-            feature.version !== assessment.featureVersion ||
-            !!feature.archivedAt ||
-            !reportRun ||
-            reportRun.runAttempt !== report.attempt,
+          stale: staleReasons.length > 0,
+          staleReasons,
           featureVerification: "not-established",
         }
       : null,

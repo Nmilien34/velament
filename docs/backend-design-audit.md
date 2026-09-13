@@ -58,3 +58,7 @@ Custom runtime conditions, export arrays, general semver ranges, pnpm YAML works
 The supported subset follows [npm workspace declarations](https://docs.npmjs.com/misc/workspaces/) and [Node package entry points](https://nodejs.org/api/packages.html).
 
 Conditional workspace exports support ordered `import`, `require`, and `default` branches, including nested branches with a depth bound. Static import/export and literal dynamic import use the import branch; literal require uses the require branch. Unknown conditions encountered before selection remain unresolved. This does not model compiler module transformations.
+
+## Report freshness
+
+Assessment report evidence includes `staleReasons`: `feature-missing`, `feature-changed`, `feature-archived`, `run-missing`, `run-attempt-changed`, and `run-not-completed`. Multiple reasons may apply. The original report remains available as historical evidence; a fresh report still does not establish feature verification.
