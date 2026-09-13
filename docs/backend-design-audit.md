@@ -64,3 +64,5 @@ Conditional workspace exports support ordered `import`, `require`, and `default`
 Assessment report evidence includes `staleReasons`: `feature-missing`, `feature-changed`, `feature-archived`, `run-missing`, `run-attempt-changed`, and `run-not-completed`. Multiple reasons may apply. The original report remains available as historical evidence; a fresh report still does not establish feature verification.
 
 Associated run evidence preserves its selected attempt when the run is unavailable (`run: null`, `stale: true`, `staleReasons: ["run-missing"]`). No association still returns `runEvidence: null`. Existing associations expose `attempt-not-recorded` or `run-attempt-changed` when applicable.
+
+Artifact imports validate assessment ownership, commit matching and completed run status before requesting GitHub credentials or downloading. The final transactional validation remains in place to catch changes during the download.

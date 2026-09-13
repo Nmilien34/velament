@@ -1,3 +1,4 @@
+import { FeatureAssessment } from "../models/FeatureAssessment.js";
 import { accessGeneration } from "./access.service.js";
 import { boundedBody, readArtifactReport } from "./artifact-report.service.js";
 import { uploadTestReport } from "./assessment.service.js";
@@ -69,6 +70,18 @@ export async function importArtifactReport(
   const run = await TestRun.findOne({ _id: runId, projectId });
   const project = await Project.findById(projectId);
   if (!run || !project) throw new HttpError(404, "NOT_FOUND", "Run not found");
+  const assessment = await FeatureAssessment.findOne({
+    _id: assessmentId,
+    projectId,
+  });
+  if (!assessment)
+    throw new HttpError(404, "NOT_FOUND", "Assessment not found");
+  if (run.sha !== assessment.sha || run.status !== "completed")
+    throw new HttpError(
+      422,
+      "EVIDENCE_MISMATCH",
+      "Select a completed run at the assessment commit before importing",
+    );
   if (!project.installationId || !project.repositoryId)
     throw new HttpError(409, "GITHUB_CONNECTION_REQUIRED", "Reconnect project");
   const generation = await accessGeneration(project.userId.toString());

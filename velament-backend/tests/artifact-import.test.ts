@@ -157,3 +157,38 @@ it.skipIf(!uri)(
     ).toBeUndefined();
   },
 );
+it.skipIf(!uri)(
+  "rejects invalid assessment imports before provider requests",
+  async () => {
+    const fetcher = setup();
+    vi.mocked(githubGet).mockClear();
+    await expect(
+      importArtifactReport(
+        projectId,
+        new mongoose.Types.ObjectId().toString(),
+        runId,
+        3,
+      ),
+    ).rejects.toMatchObject({ code: "NOT_FOUND" });
+    await FeatureAssessment.updateOne(
+      { _id: assessmentId },
+      { $set: { sha: "b".repeat(40) } },
+    );
+    await expect(
+      importArtifactReport(projectId, assessmentId, runId, 3),
+    ).rejects.toMatchObject({ code: "EVIDENCE_MISMATCH" });
+    await FeatureAssessment.updateOne(
+      { _id: assessmentId },
+      { $set: { sha: "a".repeat(40) } },
+    );
+    await TestRun.updateOne(
+      { _id: runId },
+      { $set: { status: "in_progress" } },
+    );
+    await expect(
+      importArtifactReport(projectId, assessmentId, runId, 3),
+    ).rejects.toMatchObject({ code: "EVIDENCE_MISMATCH" });
+    expect(githubGet).not.toHaveBeenCalled();
+    expect(fetcher).not.toHaveBeenCalled();
+  },
+);
