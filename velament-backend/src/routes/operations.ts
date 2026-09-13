@@ -57,6 +57,11 @@ operations.get("/metrics", async (_req, res) => {
   res.set("Cache-Control", "no-store").json({
     data: {
       uptimeSeconds: Math.floor(process.uptime()),
+      deployment: {
+        commit: /^[a-f0-9]{40}$/i.test(process.env.RENDER_GIT_COMMIT || "")
+          ? process.env.RENDER_GIT_COMMIT
+          : null,
+      },
       deletions: { pending: pendingDeletions, overdue: overdueDeletions },
       queue: {
         queued,

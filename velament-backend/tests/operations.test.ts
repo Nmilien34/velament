@@ -25,10 +25,12 @@ it("requires a configured operator token", async () => {
 });
 it("returns aggregate metrics without project data", async () => {
   vi.stubEnv("OPERATIONS_TOKEN", "a".repeat(32));
+  vi.stubEnv("RENDER_GIT_COMMIT", "a".repeat(40));
   const response = await request(app)
     .get("/internal/metrics")
     .auth("a".repeat(32), { type: "bearer" });
   expect(response.status).toBe(200);
+  expect(response.body.data.deployment).toEqual({ commit: "a".repeat(40) });
   expect(response.body.data.deletions).toEqual({ pending: 2, overdue: 2 });
   expect(response.body.data.queue).toEqual({
     queued: 0,
