@@ -41,7 +41,23 @@ export function workspaceResolver(files: SourceFile[]) {
         );
       }),
   );
-  return (importer: string, spec: string): string[] => {
+  return (
+    importer: string,
+    spec: string,
+    mode: "import" | "require" = "import",
+  ): string[] => {
+    const select = (value: unknown, depth = 0): unknown => {
+      if (!object(value)) return value;
+      if (depth >= 10) return null;
+      for (const [condition, target] of Object.entries(value)) {
+        if (!["import", "require", "default"].includes(condition)) return null;
+        if (condition === mode || condition === "default") {
+          const result = select(target, depth + 1);
+          if (result !== undefined) return result;
+        }
+      }
+      return undefined;
+    };
     if (isBuiltin(spec) || spec.startsWith("node:")) return [];
     const match = spec.match(/^(@[^/]+\/[^/]+|[^@./][^/]*)(?:\/(.+))?$/);
     if (!match) return [];
@@ -79,12 +95,18 @@ export function workspaceResolver(files: SourceFile[]) {
     let entry: unknown;
     if (Object.hasOwn(target.data, "exports")) {
       const exports = target.data.exports;
-      if (typeof exports === "string" && subpath === ".") entry = exports;
+      if (
+        subpath === "." &&
+        (typeof exports === "string" ||
+          (object(exports) &&
+            Object.keys(exports).every((k) => !k.startsWith("."))))
+      )
+        entry = select(exports);
       else if (
         object(exports) &&
         Object.keys(exports).every((k) => k.startsWith("."))
       ) {
-        if (Object.hasOwn(exports, subpath)) entry = exports[subpath];
+        if (Object.hasOwn(exports, subpath)) entry = select(exports[subpath]);
         else {
           const pattern = Object.keys(exports)
             .filter((key) => {
@@ -99,12 +121,15 @@ export function workspaceResolver(files: SourceFile[]) {
             .sort(
               (a, b) => b.indexOf("*") - a.indexOf("*") || b.length - a.length,
             )[0];
-          if (pattern && typeof exports[pattern] === "string") {
+          if (pattern && typeof select(exports[pattern]) === "string") {
             const capture = subpath.slice(
               pattern.indexOf("*"),
               subpath.length - (pattern.length - pattern.indexOf("*") - 1),
             );
-            entry = (exports[pattern] as string).replaceAll("*", capture);
+            entry = (select(exports[pattern]) as string).replaceAll(
+              "*",
+              capture,
+            );
           }
         }
       }

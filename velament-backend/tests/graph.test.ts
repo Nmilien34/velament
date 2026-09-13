@@ -165,7 +165,7 @@ it("connects declared workspace exports without exposing private subpaths", () =
 });
 it("does not guess conditional, escaping, missing or duplicate workspace targets", () => {
   for (const exports of [
-    { import: "./src/index.ts" },
+    { browser: "./src/index.ts" },
     "../main.ts",
     "./missing.ts",
     null,
@@ -244,4 +244,44 @@ it("chooses the most specific workspace export pattern and rejects traversal", (
   expect(buildEdges(files).map((e) => e.to)).toEqual([
     "packages/core/src/utils.ts",
   ]);
+});
+it("selects conditional workspace exports by import syntax", () => {
+  const files = workspaceFiles({
+    import: "./src/index.ts",
+    require: "./src/utils.ts",
+  });
+  files[2] = {
+    ...files[2]!,
+    content: "import '@app/core'; require('@app/core'); import('@app/core');",
+  };
+  expect(buildEdges(files).map((e) => e.to)).toEqual([
+    "packages/core/src/index.ts",
+    "packages/core/src/utils.ts",
+    "packages/core/src/index.ts",
+  ]);
+});
+it("keeps unknown conditions unresolved and respects an earlier default", () => {
+  const files = workspaceFiles({
+    default: "./src/utils.ts",
+    import: "./src/index.ts",
+  });
+  expect(buildEdges(files).map((e) => e.to)).toEqual([
+    "packages/core/src/utils.ts",
+  ]);
+});
+it("resolves nested export conditions and never falls through explicit blocks", () => {
+  const files = workspaceFiles({
+    ".": { import: { default: "./src/index.ts" }, default: "./src/utils.ts" },
+  });
+  expect(buildEdges(files).map((e) => e.to)).toEqual([
+    "packages/core/src/index.ts",
+  ]);
+  expect(
+    buildEdges(workspaceFiles({ import: null, default: "./src/index.ts" })),
+  ).toEqual([]);
+  expect(
+    buildEdges(
+      workspaceFiles({ browser: "./src/utils.ts", default: "./src/index.ts" }),
+    ),
+  ).toEqual([]);
 });

@@ -40,7 +40,18 @@ export function buildEdges(files: SourceFile[]): GraphEdge[] {
                 path.posix.join(path.posix.dirname(file.path), spec),
               ),
             ]
-          : [...aliases(file.path, spec), ...workspaces(file.path, spec)]) {
+          : [
+              ...aliases(file.path, spec),
+              ...workspaces(
+                file.path,
+                spec,
+                ts.isCallExpression(node) &&
+                  ts.isIdentifier(node.expression) &&
+                  node.expression.text === "require"
+                  ? "require"
+                  : "import",
+              ),
+            ]) {
         const stem = base.replace(/\.[cm]?jsx?$/, "");
         const target = [
           base,
