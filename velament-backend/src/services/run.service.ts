@@ -26,7 +26,8 @@ export async function importRun(projectId: string, runId: number) {
       status: z.string(),
       conclusion: z.string().nullable(),
       html_url: z.string().url(),
-      updated_at: z.string(),
+      updated_at: z.iso.datetime(),
+      run_attempt: z.number().int().positive().default(1),
     })
     .parse(
       await githubGet(
@@ -39,25 +40,70 @@ export async function importRun(projectId: string, runId: number) {
         token,
       ),
     );
-  return TestRun.findOneAndUpdate(
-    { projectId, githubRunId: run.id },
+  if (run.id !== runId)
+    throw new HttpError(
+      502,
+      "GITHUB_RUN_MISMATCH",
+      "GitHub returned a different run",
+    );
+  const key = { projectId, githubRunId: run.id };
+  const values = {
+    sha: run.head_sha,
+    name: run.name || "GitHub workflow",
+    status: run.status,
+    conclusion: run.conclusion,
+    url: run.html_url,
+    runAttempt: run.run_attempt,
+    providerUpdatedAt: new Date(run.updated_at),
+    completedAt: run.status === "completed" ? new Date(run.updated_at) : null,
+  };
+  // Insert once; concurrent imports can race on the unique provider run key.
+  try {
+    await TestRun.updateOne(
+      key,
+      {
+        $setOnInsert: {
+          ...values,
+          ...key,
+          environment: "unknown",
+          provenance: "github-actions",
+        },
+      },
+      { upsert: true, runValidators: true },
+    );
+  } catch (error) {
+    if ((error as { code?: number }).code !== 11000) throw error;
+  }
+  // Compare in MongoDB, so a delayed response cannot replace a newer attempt
+  // or roll a completed attempt back to an active state.
+  await TestRun.updateOne(
     {
-      $set: {
-        sha: run.head_sha,
-        name: run.name || "GitHub workflow",
-        status: run.status,
-        conclusion: run.conclusion,
-        url: run.html_url,
-        completedAt:
-          run.status === "completed" ? new Date(run.updated_at) : null,
-      },
-      $setOnInsert: {
-        projectId,
-        githubRunId: run.id,
-        environment: "unknown",
-        provenance: "github-actions",
-      },
+      ...key,
+      $or: [
+        { runAttempt: { $lt: run.run_attempt } },
+        {
+          $and: [
+            {
+              $or: [
+                { runAttempt: run.run_attempt },
+                { runAttempt: { $exists: false } },
+              ],
+            },
+            {
+              $or: [
+                { providerUpdatedAt: { $lte: values.providerUpdatedAt } },
+                { providerUpdatedAt: { $exists: false } },
+              ],
+            },
+            ...(run.status === "completed"
+              ? []
+              : [{ status: { $ne: "completed" } }]),
+          ],
+        },
+      ],
     },
-    { upsert: true, new: true, runValidators: true },
+    { $set: values },
+    { runValidators: true },
   );
+  return TestRun.findOne(key);
 }

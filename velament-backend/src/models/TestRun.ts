@@ -11,6 +11,8 @@ const schema = new Schema(
     environment: { type: String, default: "unknown" },
     provenance: { type: String, default: "github-actions" },
     completedAt: Date,
+    runAttempt: { type: Number, default: 1 },
+    providerUpdatedAt: Date,
   },
   { timestamps: true },
 );
