@@ -86,7 +86,15 @@ export function aliasResolver(files: SourceFile[]) {
           Number(b === spec) - Number(a === spec) ||
           b.split("*")[0]!.length - a.split("*")[0]!.length,
       )[0];
-    if (!mapping) return [];
+    if (!mapping) {
+      if (opts.baseUrl === undefined || path.posix.isAbsolute(spec)) return [];
+      const target = path.posix.normalize(path.posix.join(opts.baseUrl, spec));
+      return target === ".." ||
+        target.startsWith("../") ||
+        path.posix.isAbsolute(target)
+        ? []
+        : [target];
+    }
     const [key, targets] = mapping,
       [prefix, suffix] = key.split("*");
     const capture =

@@ -112,3 +112,21 @@ it("resolves relative config inheritance and refuses cycles", () => {
     ]),
   ).toEqual([]);
 });
+it("resolves baseUrl imports without explicit aliases", () => {
+  const files = [
+    {
+      path: "tsconfig.json",
+      hash: "c",
+      content: '{"compilerOptions":{"baseUrl":"src"}}',
+    },
+    { path: "main.ts", hash: "m", content: "import 'utils';" },
+    { path: "src/utils.ts", hash: "u", content: "export {};" },
+  ];
+  expect(buildEdges(files).map((e) => e.to)).toEqual(["src/utils.ts"]);
+  expect(
+    buildEdges([
+      { ...files[0]!, content: '{"compilerOptions":{"baseUrl":"../outside"}}' },
+      ...files.slice(1),
+    ]),
+  ).toEqual([]);
+});
