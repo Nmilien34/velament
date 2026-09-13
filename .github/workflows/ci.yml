@@ -25,3 +25,16 @@ jobs:
       - run: npm run typecheck
       - run: npm run build
       - run: npm test
+        env:
+          CI_REPORT_PATH: ../coverage/backend-results.json
+      - name: Generate backend evidence report
+        if: always() && hashFiles('coverage/backend-results.json') != ''
+        run: node velament-backend/dist/scripts/report-ci.js coverage/backend-results.json coverage/velament-test-report.json
+      - name: Upload backend evidence report
+        if: always() && hashFiles('coverage/velament-test-report.json') != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-test-report
+          path: coverage/velament-test-report.json
+          retention-days: 7
+          if-no-files-found: error

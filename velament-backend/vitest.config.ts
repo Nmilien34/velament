@@ -4,5 +4,11 @@ export default defineConfig({
     // Each database suite creates collections/indexes in its own database.
     // Bound concurrent setup load without serializing requests inside tests.
     maxWorkers: 2,
+    ...(process.env.CI_REPORT_PATH
+      ? {
+          reporters: ["default", "json"],
+          outputFile: { json: process.env.CI_REPORT_PATH },
+        }
+      : {}),
   },
 });

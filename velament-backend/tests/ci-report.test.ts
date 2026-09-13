@@ -1,0 +1,40 @@
+import { expect, it } from "vitest";
+import { createCiReport } from "../src/services/ci-report.service.js";
+it("creates conservative file summaries tied to commit and attempt", () => {
+  const report = createCiReport(
+    {
+      testResults: [
+        {
+          name: "/repo/tests/a.test.ts",
+          status: "passed",
+          assertionResults: [{ status: "passed" }],
+        },
+        {
+          name: "/repo/tests/b.test.ts",
+          status: "passed",
+          assertionResults: [{ status: "pending" }],
+        },
+        {
+          name: "/repo/tests/c.test.ts",
+          status: "failed",
+          assertionResults: [],
+        },
+      ],
+    },
+    "a".repeat(40),
+    2,
+  );
+  expect(report.attempt).toBe(2);
+  expect(report.tests.map((t) => t.outcome)).toEqual([
+    "passed",
+    "skipped",
+    "failed",
+  ]);
+  expect(report.tests[0]?.name).toBe("Test file: a.test.ts");
+});
+it("rejects invalid reports instead of publishing success", () => {
+  expect(() => createCiReport({}, "a".repeat(40), 1)).toThrow();
+  expect(() =>
+    createCiReport({ testResults: [] }, "a".repeat(40), 1),
+  ).toThrow();
+});

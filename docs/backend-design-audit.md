@@ -66,3 +66,7 @@ Assessment report evidence includes `staleReasons`: `feature-missing`, `feature-
 Associated run evidence preserves its selected attempt when the run is unavailable (`run: null`, `stale: true`, `staleReasons: ["run-missing"]`). No association still returns `runEvidence: null`. Existing associations expose `attempt-not-recorded` or `run-attempt-changed` when applicable.
 
 Artifact imports validate assessment ownership, commit matching and completed run status before requesting GitHub credentials or downloading. The final transactional validation remains in place to catch changes during the download.
+
+## CI evidence artifact
+
+The repository CI now emits `backend-test-report`, containing `velament-test-report.json` with the GitHub SHA, attempt and conservative test-file summaries. Any failed assertion marks its file failed; mixed skipped/passed files remain skipped. The artifact is retained for seven days and can be selected through the existing explicit import flow. It contains no source or raw test output and does not establish feature coverage. Failed build/setup steps cannot produce a test report. Report generation rejects empty, invalid or over-limit results rather than truncating them.
