@@ -184,14 +184,14 @@ export async function processNextJob(kind?: "analysis" | "webhook") {
     } else await webhook(job.payload, job.key);
     const latest = await Job.findById(job.id);
     const status = latest?.cancelRequested ? "cancelled" : "completed";
-    await Job.updateOne(
-      { _id: job.id, leaseToken },
+    const completed = await Job.updateOne(
+      { _id: job.id, leaseToken, status: "running" },
       {
         $set: { status, ...(resultId ? { resultId } : {}) },
         $unset: { leaseUntil: 1, leaseToken: 1, errorCode: 1 },
       },
     );
-    if (job.projectId)
+    if (completed.matchedCount && job.projectId)
       await Activity.create({
         projectId: job.projectId,
         kind: "analysis",

@@ -18,6 +18,7 @@ import {
 } from "../src/services/job.service.js";
 import { Project } from "../src/models/Project.js";
 import { Job } from "../src/models/Job.js";
+import { Activity } from "../src/models/Activity.js";
 import { HttpError } from "../src/utils/errors.js";
 const uri = process.env.TEST_MONGODB_URI;
 describe.skipIf(!uri)("durable analysis jobs", () => {
@@ -27,6 +28,7 @@ describe.skipIf(!uri)("durable analysis jobs", () => {
     await Job.init();
   });
   beforeEach(async () => {
+    await Activity.deleteMany({});
     await Job.deleteMany({});
     await Project.findOneAndUpdate(
       { _id: projectId },
@@ -54,6 +56,19 @@ describe.skipIf(!uri)("durable analysis jobs", () => {
     await Promise.all([processNextJob(), processNextJob()]);
     expect(analyze).toHaveBeenCalledTimes(1);
     expect((await Job.findById(a!.id))!.status).toBe("completed");
+  });
+  it("does not announce completion after losing its lease", async () => {
+    const job = await enqueueAnalysis(projectId, "lost-lease");
+    vi.mocked(analyze).mockImplementationOnce(async () => {
+      await Job.updateOne(
+        { _id: job!.id },
+        { $set: { leaseToken: "replacement-worker" } },
+      );
+      return null;
+    });
+    await processNextJob();
+    expect((await Job.findById(job!.id))?.status).toBe("running");
+    expect(await Activity.countDocuments({ projectId })).toBe(0);
   });
   it("retains the requested branch after the project switches branches", async () => {
     await enqueueAnalysis(projectId, "branch-test");
