@@ -25,8 +25,28 @@ const resultsSchema = z.object({
     .min(1)
     .max(100),
 });
-export function createCiReport(value: unknown, sha: string, attempt: number) {
+export function createCiReport(
+  value: unknown,
+  sha: string,
+  attempt: number,
+  repositoryRoot?: string,
+) {
   const results = resultsSchema.parse(value);
+  const fileLabel = (name: string) => {
+    if (!repositoryRoot) return path.basename(name);
+    const relative = path.relative(
+      repositoryRoot,
+      path.resolve(repositoryRoot, name),
+    );
+    if (
+      !relative ||
+      relative === ".." ||
+      relative.startsWith(".." + path.sep) ||
+      path.isAbsolute(relative)
+    )
+      throw new Error("Test file is outside the report repository root");
+    return relative.split(path.sep).join("/");
+  };
   const { runId: _runId, ...report } = testReportInput.parse({
     runId: "0".repeat(24),
     sha,
@@ -36,7 +56,7 @@ export function createCiReport(value: unknown, sha: string, attempt: number) {
       "Suite-level summary; tests may mock external providers. No feature coverage is established.",
     ],
     tests: results.testResults.map((result) => ({
-      name: "Test file: " + path.basename(result.name),
+      name: "Test file: " + fileLabel(result.name),
       outcome:
         result.status === "failed" ||
         result.assertionResults.some((t) => t.status === "failed")

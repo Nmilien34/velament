@@ -58,3 +58,44 @@ it("rejects run-level failures even when all file results passed", () => {
     ),
   ).toThrow();
 });
+
+it("keeps duplicate basenames distinct using repository-relative paths", () => {
+  const report = createCiReport(
+    {
+      success: true,
+      testResults: ["unit/auth.test.ts", "integration/auth.test.ts"].map(
+        (name) => ({
+          name: "/repo/" + name,
+          status: "passed",
+          assertionResults: [{ status: "passed" }],
+        }),
+      ),
+    },
+    "a".repeat(40),
+    1,
+    "/repo",
+  );
+  expect(report.tests.map((t) => t.name)).toEqual([
+    "Test file: unit/auth.test.ts",
+    "Test file: integration/auth.test.ts",
+  ]);
+});
+it("rejects test paths outside the selected repository", () => {
+  expect(() =>
+    createCiReport(
+      {
+        success: true,
+        testResults: [
+          {
+            name: "/outside/auth.test.ts",
+            status: "passed",
+            assertionResults: [],
+          },
+        ],
+      },
+      "a".repeat(40),
+      1,
+      "/repo",
+    ),
+  ).toThrow();
+});

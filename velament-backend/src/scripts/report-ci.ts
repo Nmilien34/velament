@@ -7,5 +7,6 @@ const report = createCiReport(
   JSON.parse(await readFile(input, "utf8")),
   process.env.GITHUB_SHA ?? "",
   Number(process.env.GITHUB_RUN_ATTEMPT),
+  process.cwd(),
 );
 await writeFile(output, JSON.stringify(report, null, 2));
