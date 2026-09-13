@@ -1,5 +1,8 @@
 import { it, expect, vi, afterEach } from "vitest";
 import request from "supertest";
+vi.mock("../src/models/Deletion.js", () => ({
+  Deletion: { countDocuments: vi.fn().mockResolvedValue(2) },
+}));
 vi.mock("../src/models/Job.js", () => ({
   Job: {
     countDocuments: vi.fn().mockResolvedValue(0),
@@ -26,6 +29,7 @@ it("returns aggregate metrics without project data", async () => {
     .get("/internal/metrics")
     .auth("a".repeat(32), { type: "bearer" });
   expect(response.status).toBe(200);
+  expect(response.body.data.deletions).toEqual({ pending: 2, overdue: 2 });
   expect(response.body.data.queue).toEqual({
     queued: 0,
     running: 0,

@@ -18,6 +18,7 @@ try {
   if (!response.ok) throw new Error("Metrics unavailable");
   const metrics = (await response.json()) as {
     data: {
+      deletions: { pending: number; overdue: number };
       queue: {
         failed: number;
         expiredLeases: number;
@@ -35,6 +36,8 @@ try {
   const q = metrics.data.queue;
   if (
     q.failed > 0 ||
+    !metrics.data.deletions ||
+    metrics.data.deletions.overdue > 0 ||
     !metrics.data.worker?.started ||
     metrics.data.worker.heartbeatAgeSeconds === null ||
     metrics.data.worker.heartbeatAgeSeconds > 30 ||
@@ -53,7 +56,7 @@ try {
   console.log("Backend operational checks passed");
 } catch {
   console.error(
-    "Backend operational alert: readiness, queue delay, expired lease, or uncertain dispatch. Inspect protected metrics.",
+    "Backend operational alert: readiness, queue delay, expired lease, overdue deletion, or uncertain dispatch. Inspect protected metrics.",
   );
   process.exitCode = 1;
 }

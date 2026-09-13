@@ -5,6 +5,7 @@ import { Router } from "express";
 import { timingSafeEqual, createHash } from "node:crypto";
 import { Job } from "../models/Job.js";
 import { Dispatch } from "../models/Dispatch.js";
+import { Deletion } from "../models/Deletion.js";
 import { HttpError } from "../utils/errors.js";
 export const operations = Router();
 operations.use((req, res, next) => {
@@ -28,6 +29,13 @@ operations.use((req, res, next) => {
 });
 operations.get("/metrics", async (_req, res) => {
   const now = new Date();
+  const [pendingDeletions, overdueDeletions] = await Promise.all([
+    Deletion.countDocuments({ completedAt: null }),
+    Deletion.countDocuments({
+      completedAt: null,
+      createdAt: { $lt: new Date(now.getTime() - 7200000) },
+    }),
+  ]);
   const [queued, running, failed, expired, unknown, oldest, stalePending] =
     await Promise.all([
       Job.countDocuments({ status: "queued" }),
@@ -49,6 +57,7 @@ operations.get("/metrics", async (_req, res) => {
   res.set("Cache-Control", "no-store").json({
     data: {
       uptimeSeconds: Math.floor(process.uptime()),
+      deletions: { pending: pendingDeletions, overdue: overdueDeletions },
       queue: {
         queued,
         running,
