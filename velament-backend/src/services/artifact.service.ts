@@ -1,3 +1,4 @@
+import { artifactRequest } from "./artifact-request.service.js";
 import { artifactDownloadUrl } from "./artifact-url.service.js";
 import { FeatureAssessment } from "../models/FeatureAssessment.js";
 import { accessGeneration } from "./access.service.js";
@@ -112,15 +113,18 @@ export async function importArtifactReport(
       "ARTIFACT_MISMATCH",
       "Artifact is expired, oversized, or belongs to a different run",
     );
-  const response = await fetch("https://api.github.com" + endpoint + "/zip", {
-    headers: {
-      Authorization: "Bearer " + token,
-      Accept: "application/vnd.github+json",
-      "User-Agent": "Velament",
+  const response = await artifactRequest(
+    "https://api.github.com" + endpoint + "/zip",
+    {
+      headers: {
+        Authorization: "Bearer " + token,
+        Accept: "application/vnd.github+json",
+        "User-Agent": "Velament",
+      },
+      redirect: "manual",
+      signal: AbortSignal.timeout(15000),
     },
-    redirect: "manual",
-    signal: AbortSignal.timeout(15000),
-  });
+  );
   if (response.status !== 302)
     throw new HttpError(
       502,
@@ -129,7 +133,10 @@ export async function importArtifactReport(
     );
   const url = artifactDownloadUrl(response.headers.get("location"));
   const bytes = await boundedBody(
-    await fetch(url, { redirect: "error", signal: AbortSignal.timeout(15000) }),
+    await artifactRequest(url, {
+      redirect: "error",
+      signal: AbortSignal.timeout(15000),
+    }),
   );
   const report = await readArtifactReport(bytes, runId);
   if (report.attempt !== (run.runAttempt ?? 1))
