@@ -1,3 +1,4 @@
+import { sourceFits } from "./discovery-source.js";
 import type { SourceRange } from "./discovery-source.js";
 import { summarizeDiscovery } from "./discovery-summary.service.js";
 import { createHash } from "node:crypto";
@@ -23,7 +24,7 @@ export function planRepositoryDiscovery(files: SourceFile[]) {
     a.path < b.path ? -1 : a.path > b.path ? 1 : 0,
   )) {
     const source = { path: file.path, content: file.content, hash: file.hash };
-    if (Buffer.byteLength(JSON.stringify([source])) > 80000) {
+    if (!sourceFits([source])) {
       flush();
       const lines = file.content.split("\n");
       const ranges: SourceRange[] = [];
@@ -38,7 +39,7 @@ export function planRepositoryDiscovery(files: SourceFile[]) {
             content: lines.slice(start, end).join("\n"),
             startLine: start + 1,
           };
-          if (Buffer.byteLength(JSON.stringify([part])) <= 80000) low = end;
+          if (sourceFits([part])) low = end;
           else high = end - 1;
         }
         if (low === start) break;
@@ -58,11 +59,7 @@ export function planRepositoryDiscovery(files: SourceFile[]) {
           });
       continue;
     }
-    if (
-      current.length === 40 ||
-      Buffer.byteLength(JSON.stringify([...current, source])) > 80000
-    )
-      flush();
+    if (current.length === 40 || !sourceFits([...current, source])) flush();
     current.push(source);
   }
   flush();

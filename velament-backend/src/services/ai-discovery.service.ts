@@ -1,3 +1,4 @@
+import { numberedSource, sourceFits } from "./discovery-source.js";
 import OpenAI from "openai";
 import { zodTextFormat } from "openai/helpers/zod";
 import { z } from "zod";
@@ -20,22 +21,13 @@ const schema = z.object({
   limitations: z.array(z.string()),
 });
 export function prepareSource(files: DiscoverySource[]) {
-  if (
-    !files.length ||
-    files.length > 40 ||
-    Buffer.byteLength(JSON.stringify(files)) > 80000
-  )
+  if (!sourceFits(files))
     throw new HttpError(
       422,
       "AI_SCOPE_LIMIT",
       "Select a nonempty source scope of at most 40 files and 80 KB",
     );
-  return files.map((f) => ({
-    path: f.path,
-    lines: f.content
-      .split("\n")
-      .map((text, i) => ({ line: i + (f.startLine ?? 1), text })),
-  }));
+  return numberedSource(files);
 }
 export function validateDiscovery(value: unknown, files: DiscoverySource[]) {
   const parsed = schema.parse(value);

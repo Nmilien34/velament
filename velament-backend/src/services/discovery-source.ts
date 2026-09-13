@@ -21,3 +21,20 @@ export function batchSource(
       : { path, hash: file.hash, content: file.content };
   });
 }
+
+export function numberedSource(files: DiscoverySource[]) {
+  return files.map((f) => ({
+    path: f.path,
+    lines: f.content
+      .split("\n")
+      .map((text, i) => ({ line: i + (f.startLine ?? 1), text })),
+  }));
+}
+export function sourceFits(files: DiscoverySource[]) {
+  return (
+    files.length > 0 &&
+    files.length <= 40 &&
+    Buffer.byteLength(JSON.stringify(files)) <= 80000 &&
+    Buffer.byteLength(JSON.stringify(numberedSource(files))) <= 80000
+  );
+}

@@ -95,3 +95,17 @@ it("splits large files without losing lines or resetting citations", async () =>
     ),
   ).toThrow();
 });
+
+it("bounds the serialized numbered source, including short-line overhead", async () => {
+  const { batchSource } = await import("../src/services/discovery-source.js");
+  const files = [file("short.ts", "x\n".repeat(6000))];
+  expect(() => prepareSource(files)).toThrow();
+  const plan = planRepositoryDiscovery(files);
+  expect(plan.batches.length).toBeGreaterThan(1);
+  for (const batch of plan.batches)
+    expect(
+      Buffer.byteLength(
+        JSON.stringify(prepareSource(batchSource(files, batch))),
+      ),
+    ).toBeLessThanOrEqual(80000);
+});
