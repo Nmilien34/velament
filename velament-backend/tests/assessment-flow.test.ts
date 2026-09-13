@@ -246,4 +246,38 @@ describe.skipIf(!uri)("feature assessment flow", () => {
       (await request(app).get(url).set(auth())).body.data.reportEvidence.stale,
     ).toBe(true);
   });
+  it("removes uploaded evidence without removing the assessment or run association", async () => {
+    const url = base() + "/assessments/" + assessmentId;
+    expect((await request(app).delete(url + "/test-report")).status).toBe(401);
+    expect(
+      (
+        await request(app)
+          .delete(url + "/test-report")
+          .set(auth())
+      ).status,
+    ).toBe(204);
+    const response = await request(app).get(url).set(auth());
+    expect(response.status).toBe(200);
+    expect(response.body.data.reportEvidence).toBeNull();
+    expect(response.body.data.assessment.testRunId).toBeTruthy();
+    expect(
+      (
+        await request(app)
+          .delete(url + "/test-report")
+          .set(auth())
+      ).status,
+    ).toBe(204);
+    expect(
+      (
+        await request(app)
+          .delete(
+            base() +
+              "/assessments/" +
+              new mongoose.Types.ObjectId() +
+              "/test-report",
+          )
+          .set(auth())
+      ).status,
+    ).toBe(404);
+  });
 });

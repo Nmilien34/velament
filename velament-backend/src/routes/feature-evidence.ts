@@ -205,6 +205,18 @@ featureEvidence.get(
     });
   },
 );
+featureEvidence.delete(
+  "/projects/:projectId/assessments/:id/test-report",
+  async (req, res) => {
+    const result = await FeatureAssessment.updateOne(
+      { _id: objectId.parse(req.params.id), projectId: res.locals.projectId },
+      { $unset: { testReport: 1 } },
+    );
+    if (!result.matchedCount)
+      throw new HttpError(404, "NOT_FOUND", "Assessment not found");
+    res.sendStatus(204);
+  },
+);
 featureEvidence.put(
   "/projects/:projectId/assessments/:id/test-report",
   async (req, res) => {
