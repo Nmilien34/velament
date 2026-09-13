@@ -97,7 +97,7 @@ export async function readRepository(
   const candidates = tree.tree.filter(
     (f) =>
       f.type === "blob" &&
-      /\.(tsx?|jsx?|mts|cts)$/.test(f.path) &&
+      /\.(tsx?|jsx?|mts|cts|mjs|cjs)$/.test(f.path) &&
       !/(^|\/)(node_modules|dist|build|vendor)\//.test(f.path),
   );
   const selected = candidates
@@ -123,6 +123,7 @@ export async function readRepository(
   const limitations = [
     "Static relative import graph only. No runtime execution, call tracing, alias resolution, or AI inference.",
     "Only TypeScript and JavaScript source is analyzed.",
+    "Literal relative dynamic imports and require calls are mapped as static references; runtime execution and require symbol binding are not verified.",
   ];
   if (tree.truncated) limitations.push("GitHub tree was truncated.");
   if (candidates.length > files.length)

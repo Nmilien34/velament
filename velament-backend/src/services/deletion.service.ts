@@ -130,6 +130,7 @@ export async function processDeletion() {
         "Pin",
         "Investigation",
         "FeatureAssessment",
+        "RealityReview",
         "AiDiscovery",
         "TestRun",
         "Dispatch",

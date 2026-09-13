@@ -1,4 +1,7 @@
 import { Investigation } from "../models/Investigation.js";
+import { inspectReality } from "../services/reality.service.js";
+import { RealityReview } from "../models/RealityReview.js";
+import { Feature } from "../models/Feature.js";
 import { diagnoseWithAI } from "../services/ai-diagnosis.service.js";
 import {
   getDiscovery,
@@ -24,6 +27,102 @@ import {
 } from "../services/assessment.service.js";
 import { HttpError } from "../utils/errors.js";
 export const featureEvidence = Router();
+featureEvidence.get(
+  "/projects/:projectId/revisions/:revisionId/reality",
+  async (req, res) => {
+    const snapshot = await revision(
+      res.locals.projectId,
+      objectId.parse(req.params.revisionId),
+    );
+    const featureId =
+      req.query.featureId === undefined
+        ? undefined
+        : objectId.parse(req.query.featureId);
+    const feature = featureId
+      ? await Feature.findOne({
+          _id: featureId,
+          projectId: res.locals.projectId,
+          archivedAt: null,
+        })
+      : null;
+    if (featureId && !feature)
+      throw new HttpError(404, "NOT_FOUND", "Active feature not found");
+    const result = inspectReality(
+      feature
+        ? snapshot.files.filter((f) => feature.paths.includes(f.path))
+        : snapshot.files,
+    );
+    if (feature)
+      result.limitations.push(
+        "Scope uses the feature's current mapped paths; unavailable paths and unmapped behavior remain unknown.",
+      );
+    const reviews = await RealityReview.find({
+      projectId: res.locals.projectId,
+      revisionId: snapshot.id,
+      findingId: { $in: result.findings.map((f) => f.id) },
+    }).select("findingId reason updatedAt");
+    res.json({
+      data: {
+        ...result,
+        reviews,
+        revisionId: snapshot.id,
+        sha: snapshot.sha,
+        limitations: [...snapshot.limitations, ...result.limitations],
+      },
+    });
+  },
+);
+featureEvidence.put(
+  "/projects/:projectId/revisions/:revisionId/reality/:findingId/review",
+  async (req, res) => {
+    const { reason } = z
+      .object({ reason: z.string().trim().min(1).max(2000) })
+      .strict()
+      .parse(req.body);
+    const snapshot = await revision(
+      res.locals.projectId,
+      objectId.parse(req.params.revisionId),
+    );
+    const findingId = z
+      .string()
+      .regex(/^[a-f0-9]{64}$/)
+      .parse(req.params.findingId);
+    if (
+      !snapshot.files.some((file) =>
+        inspectReality([file]).findings.some((f) => f.id === findingId),
+      )
+    )
+      throw new HttpError(
+        404,
+        "NOT_FOUND",
+        "Finding not present in this revision",
+      );
+    const review = await RealityReview.findOneAndUpdate(
+      { projectId: res.locals.projectId, revisionId: snapshot.id, findingId },
+      { $set: { reason } },
+      { upsert: true, new: true, runValidators: true },
+    );
+    res.json({ data: review });
+  },
+);
+featureEvidence.delete(
+  "/projects/:projectId/revisions/:revisionId/reality/:findingId/review",
+  async (req, res) => {
+    const snapshot = await revision(
+      res.locals.projectId,
+      objectId.parse(req.params.revisionId),
+    );
+    await RealityReview.deleteOne({
+      projectId: res.locals.projectId,
+      revisionId: snapshot.id,
+      findingId: z
+        .string()
+        .regex(/^[a-f0-9]{64}$/)
+        .parse(req.params.findingId),
+    });
+    res.sendStatus(204);
+  },
+);
 featureEvidence.get(
   "/projects/:projectId/revisions/:revisionId/feature-candidates",
   async (req, res) => {

@@ -12,6 +12,7 @@ import { Project } from "../src/models/Project.js";
 import { User } from "../src/models/User.js";
 import { Job } from "../src/models/Job.js";
 import { Feature } from "../src/models/Feature.js";
+import { RealityReview } from "../src/models/RealityReview.js";
 const uri = process.env.TEST_MONGODB_URI;
 it.skipIf(!uri)(
   "backs off a failed purge so another deletion can proceed",
@@ -139,6 +140,12 @@ it.skipIf(!uri)(
       revisionId: revision.id,
     });
     const d = await requestDeletion(user.id, p.id);
+    await RealityReview.create({
+      projectId: p.id,
+      revisionId: revision.id,
+      findingId: "a".repeat(64),
+      reason: "Intentional policy",
+    });
     await Deletion.updateOne({ _id: d!.id }, { $set: { dueAt: new Date(0) } });
     const job = await Job.create({
       key: "block",
@@ -156,6 +163,7 @@ it.skipIf(!uri)(
     expect(await Job.countDocuments({ projectId: p.id })).toBe(0);
     expect(await Feature.countDocuments({ projectId: p.id })).toBe(0);
     expect(await Revision.countDocuments({ projectId: p.id })).toBe(0);
+    expect(await RealityReview.countDocuments({ projectId: p.id })).toBe(0);
   },
 );
 it.skipIf(!uri)(

@@ -8,6 +8,22 @@ const files = [
   },
   { path: "src/b.ts", content: "export const b = 1;", hash: "b" },
 ];
+it("maps literal dynamic imports and CommonJS references without inventing variable targets", () => {
+  const result = buildEdges([
+    {
+      path: "main.ts",
+      hash: "a",
+      content:
+        "import('./lazy.mjs');\nconst x = require('./legacy.cjs');\nimport(variable);",
+    },
+    { path: "lazy.mts", hash: "b", content: "export {};" },
+    { path: "legacy.cts", hash: "c", content: "export {};" },
+  ]);
+  expect(result.map((e) => [e.to, e.line])).toEqual([
+    ["lazy.mts", 1],
+    ["legacy.cts", 2],
+  ]);
+});
 it("resolves relative TypeScript imports with source lines", () =>
   expect(buildEdges(files)).toEqual([
     { from: "src/a.ts", to: "src/b.ts", kind: "import", line: 1 },

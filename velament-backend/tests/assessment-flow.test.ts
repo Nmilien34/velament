@@ -73,6 +73,62 @@ describe.skipIf(!uri)("feature assessment flow", () => {
     expect(res.status).toBe(200);
     expect(res.body.data.candidates[0].verification).toBe("unverified");
   });
+  it("scopes reality findings and intentional reviews to an exact revision", async () => {
+    const r = await Revision.create({
+      projectId,
+      sha: "c".repeat(40),
+      branch: "main",
+      state: "partial",
+      files: [
+        { path: "config.ts", hash: "fixed", content: "const timeout = 3600;" },
+      ],
+      edges: [],
+      limitations: [],
+    });
+    const url = base() + "/revisions/" + r.id + "/reality";
+    const found = await request(app).get(url).set(auth());
+    expect(found.status).toBe(200);
+    const findingId = found.body.data.findings[0].id;
+    expect(
+      (
+        await request(app)
+          .put(url + "/" + findingId + "/review")
+          .set(auth())
+          .send({ reason: "Intentional timeout policy" })
+      ).status,
+    ).toBe(200);
+    const reviewed = await request(app).get(url).set(auth());
+    expect(reviewed.body.data.reviews[0].reason).toBe(
+      "Intentional timeout policy",
+    );
+    expect(reviewed.body.data.verification).toBe("not-established");
+    expect(
+      (
+        await request(app)
+          .get(base() + "/revisions/" + revisionId + "/reality")
+          .set(auth())
+      ).body.data.reviews,
+    ).toEqual([]);
+    expect(
+      (
+        await request(app)
+          .put(url + "/" + "f".repeat(64) + "/review")
+          .set(auth())
+          .send({ reason: "Invalid finding" })
+      ).status,
+    ).toBe(404);
+    expect(
+      (
+        await request(app)
+          .delete(url + "/" + findingId + "/review")
+          .set(auth())
+      ).status,
+    ).toBe(204);
+    expect((await request(app).get(url).set(auth())).body.data.reviews).toEqual(
+      [],
+    );
+    expect((await request(app).get(url)).status).toBe(401);
+  });
   it("saves an assessment tied to feature version and revision", async () => {
     const res = await request(app)
       .post(base() + "/features/" + featureId + "/assessments")

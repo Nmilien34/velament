@@ -19,6 +19,15 @@ export function buildEdges(files: SourceFile[]): GraphEdge[] {
         ts.isStringLiteral(node.moduleSpecifier)
       )
         spec = node.moduleSpecifier.text;
+      if (
+        ts.isCallExpression(node) &&
+        (node.expression.kind === ts.SyntaxKind.ImportKeyword ||
+          (ts.isIdentifier(node.expression) &&
+            node.expression.text === "require")) &&
+        node.arguments[0] &&
+        ts.isStringLiteral(node.arguments[0])
+      )
+        spec = node.arguments[0].text;
       if (spec?.startsWith(".")) {
         const base = path.posix.normalize(
           path.posix.join(path.posix.dirname(file.path), spec),
@@ -26,14 +35,21 @@ export function buildEdges(files: SourceFile[]): GraphEdge[] {
         const stem = base.replace(/\.[cm]?jsx?$/, "");
         const target = [
           base,
+          ...(base.endsWith(".mjs") ? [base.slice(0, -4) + ".mts"] : []),
+          ...(base.endsWith(".cjs") ? [base.slice(0, -4) + ".cts"] : []),
           ...[
             ".ts",
             ".tsx",
             ".js",
             ".jsx",
+            ".mts",
+            ".cts",
+            ".mjs",
+            ".cjs",
             "/index.ts",
             "/index.tsx",
             "/index.js",
+            "/index.jsx",
           ].map((ext) => stem + ext),
         ].find((p) => known.has(p));
         if (target)
