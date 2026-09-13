@@ -86,7 +86,19 @@ export async function boundedBody(response: Response) {
       chunks.push(value);
     }
     return Buffer.concat(chunks);
+  } catch (error) {
+    if (error instanceof HttpError) throw error;
+    throw new HttpError(
+      502,
+      "ARTIFACT_UNAVAILABLE",
+      "Artifact download was interrupted; retry later",
+    );
   } finally {
-    await reader.cancel();
+    try {
+      await reader.cancel();
+    } catch {
+      /* Cleanup must not replace the download result. */
+    }
+    reader.releaseLock();
   }
 }

@@ -48,3 +48,30 @@ it("returns actionable errors for invalid archives and failed downloads", async 
     boundedBody(new Response(new Uint8Array(2000001))),
   ).rejects.toMatchObject({ status: 422, code: "ARTIFACT_TOO_LARGE" });
 });
+it("normalizes interrupted downloads and releases the reader lock", async () => {
+  const stream = new ReadableStream<Uint8Array>({
+    pull(controller) {
+      controller.error(new Error("private upstream detail"));
+    },
+  });
+  await expect(boundedBody(new Response(stream))).rejects.toMatchObject({
+    status: 502,
+    code: "ARTIFACT_UNAVAILABLE",
+  });
+  expect(stream.locked).toBe(false);
+});
+it("preserves the size error when cancellation itself fails", async () => {
+  const stream = new ReadableStream<Uint8Array>({
+    start(controller) {
+      controller.enqueue(new Uint8Array(2000001));
+    },
+    cancel() {
+      throw new Error("cleanup failed");
+    },
+  });
+  await expect(boundedBody(new Response(stream))).rejects.toMatchObject({
+    status: 422,
+    code: "ARTIFACT_TOO_LARGE",
+  });
+  expect(stream.locked).toBe(false);
+});
