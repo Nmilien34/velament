@@ -44,7 +44,6 @@ Metrics now include worker heartbeat age, polling failures and stale pending dis
 
 Render is live at https://velament-backend.onrender.com. Configure an external schedule for the operations checker and an alert destination. Neither external alert delivery nor the production backup schedule/restore has been verified by these code changes. Those require the account/provider configuration, not frontend implementation.
 
-
 ## Resumable repository feature discovery
 
 `GET /api/projects/:projectId/revisions/:revisionId/repository-discovery` returns deterministic batch IDs and paths, per-batch status/results, `nextBatchId`, `analyzedFiles`, `snapshotFiles`, skipped files and snapshot limitations. This endpoint does not send source to an AI provider. It marks abandoned pending requests failed using the existing two-minute recovery threshold.
