@@ -70,6 +70,32 @@ describe.skipIf(!uri)("durable analysis jobs", () => {
     expect((await Job.findById(job!.id))?.status).toBe("running");
     expect(await Activity.countDocuments({ projectId })).toBe(0);
   });
+  it("honors cancellation arriving as the completion write begins", async () => {
+    const job = await enqueueAnalysis(projectId, "late-cancel");
+    const original = Job.updateOne.bind(Job);
+    vi.mocked(analyze).mockImplementationOnce(async () => {
+      vi.spyOn(Job, "updateOne").mockImplementationOnce(((
+        filter: unknown,
+        update: unknown,
+        options: unknown,
+      ) => {
+        return (async () => {
+          await original({ _id: job!.id }, { $set: { cancelRequested: true } });
+          return original(filter as never, update as never, options as never);
+        })();
+      }) as never);
+      return null;
+    });
+    try {
+      await processNextJob();
+      expect((await Job.findById(job!.id))?.status).toBe("cancelled");
+      expect((await Activity.findOne({ projectId }))?.message).toContain(
+        "cancelled",
+      );
+    } finally {
+      vi.restoreAllMocks();
+    }
+  });
   it("retains the requested branch after the project switches branches", async () => {
     await enqueueAnalysis(projectId, "branch-test");
     await Project.updateOne(

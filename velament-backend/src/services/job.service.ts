@@ -182,25 +182,30 @@ export async function processNextJob(kind?: "analysis" | "webhook") {
       );
       resultId = result?.id;
     } else await webhook(job.payload, job.key);
-    const latest = await Job.findById(job.id);
-    const status = latest?.cancelRequested ? "cancelled" : "completed";
     const completed = await Job.updateOne(
       { _id: job.id, leaseToken, status: "running" },
-      {
-        $set: { status, ...(resultId ? { resultId } : {}) },
-        $unset: { leaseUntil: 1, leaseToken: 1, errorCode: 1 },
-      },
+      [
+        {
+          $set: {
+            status: { $cond: ["$cancelRequested", "cancelled", "completed"] },
+            ...(resultId ? { resultId: { $literal: resultId } } : {}),
+          },
+        },
+        { $unset: ["leaseUntil", "leaseToken", "errorCode"] },
+      ],
     );
-    if (completed.matchedCount && job.projectId)
+    if (completed.matchedCount && job.projectId) {
+      const saved = await Job.findById(job.id);
       await Activity.create({
         projectId: job.projectId,
         kind: "analysis",
         message:
-          status === "cancelled"
+          saved?.status === "cancelled"
             ? "Analysis cancelled; any completed snapshot remains available."
             : "Analysis completed. Review coverage limitations.",
         referenceId: resultId,
       });
+    }
   } catch (error) {
     const cancelled = await Job.exists({ _id: job.id, cancelRequested: true });
     const terminal =
