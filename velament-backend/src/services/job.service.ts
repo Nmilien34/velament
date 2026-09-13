@@ -207,23 +207,29 @@ export async function processNextJob(kind?: "analysis" | "webhook") {
       });
     }
   } catch (error) {
-    const cancelled = await Job.exists({ _id: job.id, cancelRequested: true });
     const terminal =
       job.attempts >= 3 ||
       (error instanceof HttpError &&
         ([400, 401, 403, 404, 422].includes(error.status) ||
           error.code === "GITHUB_NOT_CONFIGURED"));
-    await Job.updateOne(
-      { _id: job.id, leaseToken },
+    await Job.updateOne({ _id: job.id, leaseToken }, [
       {
         $set: {
-          status: cancelled ? "cancelled" : terminal ? "failed" : "queued",
-          errorCode: error instanceof HttpError ? error.code : "JOB_FAILED",
+          status: {
+            $cond: [
+              "$cancelRequested",
+              "cancelled",
+              terminal ? "failed" : "queued",
+            ],
+          },
+          errorCode: {
+            $literal: error instanceof HttpError ? error.code : "JOB_FAILED",
+          },
           availableAt: new Date(Date.now() + 60000),
         },
-        $unset: { leaseUntil: 1, leaseToken: 1 },
       },
-    );
+      { $unset: ["leaseUntil", "leaseToken"] },
+    ]);
   }
   return true;
 }

@@ -96,6 +96,32 @@ describe.skipIf(!uri)("durable analysis jobs", () => {
       vi.restoreAllMocks();
     }
   });
+  it.each([
+    new Error("temporary"),
+    new HttpError(401, "RECONNECT", "Reconnect"),
+  ])("honors cancellation during failure settlement: %s", async (failure) => {
+    const job = await enqueueAnalysis(projectId, "late-cancel");
+    const original = Job.updateOne.bind(Job);
+    vi.mocked(analyze).mockImplementationOnce(async () => {
+      vi.spyOn(Job, "updateOne").mockImplementationOnce(((
+        filter: unknown,
+        update: unknown,
+        options: unknown,
+      ) => {
+        return (async () => {
+          await original({ _id: job!.id }, { $set: { cancelRequested: true } });
+          return original(filter as never, update as never, options as never);
+        })();
+      }) as never);
+      throw failure;
+    });
+    try {
+      await processNextJob();
+      expect((await Job.findById(job!.id))?.status).toBe("cancelled");
+    } finally {
+      vi.restoreAllMocks();
+    }
+  });
   it("retains the requested branch after the project switches branches", async () => {
     await enqueueAnalysis(projectId, "branch-test");
     await Project.updateOne(
