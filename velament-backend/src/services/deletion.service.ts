@@ -92,59 +92,69 @@ export async function processDeletion() {
     dueAt: { $lte: new Date() },
   }).sort({ dueAt: 1 });
   if (!next) return;
-  await mongoose.connection.transaction(async (session) => {
-    // Claim by a write within the same transaction as every deletion.
-    const claimed = await Deletion.findOneAndUpdate(
-      { _id: next.id, completedAt: null },
-      { $set: { completedAt: new Date() } },
-      { session },
-    );
-    if (!claimed) return;
-    const projects = await Project.find({
-      userId: next.userId,
-      ...(next.projectId ? { _id: next.projectId } : {}),
-    })
-      .select("_id")
-      .session(session);
-    const ids = projects.map((p) => p._id);
-    if (
-      await Job.exists({
-        projectId: { $in: ids },
-        status: { $in: ["queued", "running"] },
-      }).session(session)
-    ) {
-      await Deletion.updateOne(
-        { _id: next.id },
-        {
-          $unset: { completedAt: 1 },
-          $set: { dueAt: new Date(Date.now() + 60000) },
-        },
+  try {
+    await mongoose.connection.transaction(async (session) => {
+      // Claim by a write within the same transaction as every deletion.
+      const claimed = await Deletion.findOneAndUpdate(
+        { _id: next.id, completedAt: null },
+        { $set: { completedAt: new Date() } },
         { session },
       );
-      return;
-    }
-    for (const name of [
-      "Revision",
-      "Feature",
-      "Pin",
-      "Investigation",
-      "FeatureAssessment",
-      "AiDiscovery",
-      "TestRun",
-      "Dispatch",
-      "Activity",
-      "Job",
-    ]) {
-      const target = mongoose.models[name];
-      if (!target) throw new Error("Deletion model unavailable: " + name);
-      await target.deleteMany({ projectId: { $in: ids } }, { session });
-    }
-    await Project.deleteMany({ _id: { $in: ids } }, { session });
-    if (!next.projectId) {
-      await GitHubConnection.deleteMany({ userId: next.userId }, { session });
-      await GitHubState.deleteMany({ userId: next.userId }, { session });
-      await Session.deleteMany({ userId: next.userId }, { session });
-      await User.deleteOne({ _id: next.userId }, { session });
-    }
-  });
+      if (!claimed) return;
+      const projects = await Project.find({
+        userId: next.userId,
+        ...(next.projectId ? { _id: next.projectId } : {}),
+      })
+        .select("_id")
+        .session(session);
+      const ids = projects.map((p) => p._id);
+      if (
+        await Job.exists({
+          projectId: { $in: ids },
+          status: { $in: ["queued", "running"] },
+        }).session(session)
+      ) {
+        await Deletion.updateOne(
+          { _id: next.id },
+          {
+            $unset: { completedAt: 1 },
+            $set: { dueAt: new Date(Date.now() + 60000) },
+          },
+          { session },
+        );
+        return;
+      }
+      for (const name of [
+        "Revision",
+        "Feature",
+        "Pin",
+        "Investigation",
+        "FeatureAssessment",
+        "AiDiscovery",
+        "TestRun",
+        "Dispatch",
+        "Activity",
+        "Job",
+      ]) {
+        const target = mongoose.models[name];
+        if (!target) throw new Error("Deletion model unavailable: " + name);
+        await target.deleteMany({ projectId: { $in: ids } }, { session });
+      }
+      await Project.deleteMany({ _id: { $in: ids } }, { session });
+      if (!next.projectId) {
+        await GitHubConnection.deleteMany({ userId: next.userId }, { session });
+        await GitHubState.deleteMany({ userId: next.userId }, { session });
+        await Session.deleteMany({ userId: next.userId }, { session });
+        await User.deleteOne({ _id: next.userId }, { session });
+      }
+    });
+  } catch (error) {
+    // Preserve the request and let other due deletions run before retrying.
+    // A completed request is never reopened, including an uncertain commit.
+    await Deletion.updateOne(
+      { _id: next.id, completedAt: null, dueAt: next.dueAt },
+      { $set: { dueAt: new Date(Date.now() + 60000) } },
+    );
+    throw error;
+  }
 }

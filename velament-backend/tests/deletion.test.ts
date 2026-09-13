@@ -1,5 +1,5 @@
 import { Revision } from "../src/models/Revision.js";
-import { beforeAll, afterAll, it, expect } from "vitest";
+import { beforeAll, afterAll, it, expect, vi } from "vitest";
 import mongoose from "mongoose";
 import { randomUUID } from "node:crypto";
 import "../src/app.js";
@@ -13,6 +13,39 @@ import { User } from "../src/models/User.js";
 import { Job } from "../src/models/Job.js";
 import { Feature } from "../src/models/Feature.js";
 const uri = process.env.TEST_MONGODB_URI;
+it.skipIf(!uri)(
+  "backs off a failed purge so another deletion can proceed",
+  async () => {
+    const first = await Deletion.create({
+      userId: new mongoose.Types.ObjectId(),
+      projectId: new mongoose.Types.ObjectId(),
+      key: "failure-first",
+      dueAt: new Date(0),
+    });
+    const second = await Deletion.create({
+      userId: new mongoose.Types.ObjectId(),
+      projectId: new mongoose.Types.ObjectId(),
+      key: "failure-second",
+      dueAt: new Date(1),
+    });
+    const spy = vi
+      .spyOn(mongoose.connection, "transaction")
+      .mockRejectedValueOnce(new Error("temporary database error"));
+    try {
+      await expect(processDeletion()).rejects.toThrow(
+        "temporary database error",
+      );
+    } finally {
+      spy.mockRestore();
+    }
+    expect(
+      (await Deletion.findById(first.id))?.dueAt.getTime(),
+    ).toBeGreaterThan(Date.now());
+    await processDeletion();
+    expect((await Deletion.findById(second.id))?.completedAt).toBeTruthy();
+    expect((await Deletion.findById(first.id))?.completedAt).toBeFalsy();
+  },
+);
 it.skipIf(!uri)(
   "deletion cancels queued analysis and signals running analysis",
   async () => {
