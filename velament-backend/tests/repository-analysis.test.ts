@@ -71,3 +71,26 @@ it("rejects a blob whose real size exceeds the per-file budget", async () => {
   expect(result.files).toHaveLength(0);
   expect(result.limitations.join(" ")).toContain("Some files");
 });
+it("captures workspace manifests while excluding dependency and build manifests", async () => {
+  vi.mocked(githubRequest).mockImplementation(async (path) => {
+    if (path.includes("/commits/"))
+      return { sha: "a".repeat(40), commit: { tree: { sha: "root" } } };
+    if (path.includes("/trees/"))
+      return {
+        truncated: false,
+        tree: [
+          "package.json",
+          "packages/core/package.json",
+          "node_modules/core/package.json",
+          "dist/package.json",
+        ].map((path) => ({ path, type: "blob", sha: path, size: 2 })),
+      };
+    return {
+      content: Buffer.from("{}").toString("base64"),
+      encoding: "base64",
+    };
+  });
+  expect(
+    (await readRepository("a", "b", "main", "token")).files.map((f) => f.path),
+  ).toEqual(["package.json", "packages/core/package.json"]);
+});

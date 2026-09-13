@@ -1,9 +1,11 @@
+import { workspaceResolver } from "./workspace-resolution.service.js";
 import { aliasResolver } from "./alias.service.js";
 import ts from "typescript";
 import path from "node:path";
 import type { SourceFile, GraphEdge, TraceFrame } from "@velament/shared";
 export function buildEdges(files: SourceFile[]): GraphEdge[] {
   const aliases = aliasResolver(files);
+  const workspaces = workspaceResolver(files);
   const known = new Set(files.map((f) => f.path)),
     edges: GraphEdge[] = [];
   for (const file of files) {
@@ -38,7 +40,7 @@ export function buildEdges(files: SourceFile[]): GraphEdge[] {
                 path.posix.join(path.posix.dirname(file.path), spec),
               ),
             ]
-          : aliases(file.path, spec)) {
+          : [...aliases(file.path, spec), ...workspaces(file.path, spec)]) {
         const stem = base.replace(/\.[cm]?jsx?$/, "");
         const target = [
           base,

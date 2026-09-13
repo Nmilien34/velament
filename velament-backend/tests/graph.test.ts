@@ -130,3 +130,99 @@ it("resolves baseUrl imports without explicit aliases", () => {
     ]),
   ).toEqual([]);
 });
+
+const workspaceFiles = (
+  exports: unknown = { ".": "./src/index.ts", "./utils": "./src/utils.ts" },
+) => [
+  {
+    path: "package.json",
+    hash: "r",
+    content: JSON.stringify({
+      workspaces: ["packages/*"],
+      dependencies: { "@app/core": "*" },
+    }),
+  },
+  {
+    path: "packages/core/package.json",
+    hash: "p",
+    content: JSON.stringify({ name: "@app/core", exports }),
+  },
+  {
+    path: "main.ts",
+    hash: "m",
+    content:
+      "import '@app/core'; import '@app/core/utils'; import '@app/core/private';",
+  },
+  { path: "packages/core/src/index.ts", hash: "i", content: "export {};" },
+  { path: "packages/core/src/utils.ts", hash: "u", content: "export {};" },
+  { path: "packages/core/private.ts", hash: "x", content: "export {};" },
+];
+it("connects declared workspace exports without exposing private subpaths", () => {
+  expect(buildEdges(workspaceFiles()).map((e) => e.to)).toEqual([
+    "packages/core/src/index.ts",
+    "packages/core/src/utils.ts",
+  ]);
+});
+it("does not guess conditional, escaping, missing or duplicate workspace targets", () => {
+  for (const exports of [
+    { import: "./src/index.ts" },
+    "../main.ts",
+    "./missing.ts",
+    null,
+  ]) {
+    expect(buildEdges(workspaceFiles(exports))).toEqual([]);
+  }
+  const files = workspaceFiles();
+  expect(
+    buildEdges([
+      ...files,
+      { ...files[1]!, path: "packages/duplicate/package.json" },
+    ]),
+  ).toEqual([]);
+  expect(
+    buildEdges([
+      { ...files[0]!, content: '{"workspaces":["packages/*"]}' },
+      ...files.slice(1),
+    ]),
+  ).toEqual([]);
+});
+it("uses a declared workspace main when exports is absent", () => {
+  const files = workspaceFiles();
+  files[1] = {
+    ...files[1]!,
+    content: '{"name":"@app/core","main":"./src/index.js"}',
+  };
+  expect(buildEdges(files).map((e) => e.to)).toEqual([
+    "packages/core/src/index.ts",
+  ]);
+});
+it("requires workspace membership and uses the importing package dependency declaration", () => {
+  const files = workspaceFiles();
+  expect(
+    buildEdges([
+      { ...files[0]!, content: '{"dependencies":{"@app/core":"*"}}' },
+      ...files.slice(1),
+    ]),
+  ).toEqual([]);
+  expect(
+    buildEdges([
+      ...files.filter((f) => f.path !== "main.ts"),
+      {
+        path: "app/package.json",
+        hash: "a",
+        content: '{"dependencies":{"@app/core":"^99.0.0"}}',
+      },
+      { ...files[2]!, path: "app/main.ts" },
+    ]),
+  ).toEqual([]);
+});
+it("does not replace Node builtins with same-named workspace packages", () => {
+  const files = workspaceFiles();
+  files[0] = {
+    ...files[0]!,
+    content: '{"workspaces":["packages/*"],"dependencies":{"fs":"*"}}',
+  };
+  files[1] = { ...files[1]!, content: '{"name":"fs","main":"./src/index.ts"}' };
+  files[2] = { ...files[2]!, content: "import 'fs';" };
+  expect(buildEdges(files)).toEqual([]);
+});
