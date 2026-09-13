@@ -1,3 +1,6 @@
+import { accessGeneration } from "./access.service.js";
+import { boundedBody, readArtifactReport } from "./artifact-report.service.js";
+import { uploadTestReport } from "./assessment.service.js";
 import { z } from "zod";
 import { Project } from "../models/Project.js";
 import { TestRun } from "../models/TestRun.js";
@@ -55,4 +58,90 @@ export async function listRunArtifacts(
     ),
     page,
   );
+}
+
+export async function importArtifactReport(
+  projectId: string,
+  assessmentId: string,
+  runId: string,
+  artifactId: number,
+) {
+  const run = await TestRun.findOne({ _id: runId, projectId });
+  const project = await Project.findById(projectId);
+  if (!run || !project) throw new HttpError(404, "NOT_FOUND", "Run not found");
+  if (!project.installationId || !project.repositoryId)
+    throw new HttpError(409, "GITHUB_CONNECTION_REQUIRED", "Reconnect project");
+  const generation = await accessGeneration(project.userId.toString());
+  const token = await repositoryToken(
+    project.userId.toString(),
+    project.installationId,
+    project.repositoryId,
+  );
+  const endpoint = `/repos/${encodeURIComponent(project.owner)}/${encodeURIComponent(project.repo)}/actions/artifacts/${artifactId}`;
+  const metadata = z
+    .object({
+      id: z.number(),
+      expired: z.boolean(),
+      size_in_bytes: z.number(),
+      workflow_run: z.object({ id: z.number(), head_sha: z.string() }),
+    })
+    .parse(await githubGet(endpoint, token));
+  if (
+    metadata.id !== artifactId ||
+    metadata.expired ||
+    metadata.size_in_bytes > 2_000_000 ||
+    metadata.workflow_run.id !== run.githubRunId ||
+    metadata.workflow_run.head_sha !== run.sha
+  )
+    throw new HttpError(
+      422,
+      "ARTIFACT_MISMATCH",
+      "Artifact is expired, oversized, or belongs to a different run",
+    );
+  const response = await fetch("https://api.github.com" + endpoint + "/zip", {
+    headers: {
+      Authorization: "Bearer " + token,
+      Accept: "application/vnd.github+json",
+      "User-Agent": "Velament",
+    },
+    redirect: "manual",
+    signal: AbortSignal.timeout(15000),
+  });
+  if (response.status !== 302)
+    throw new HttpError(
+      502,
+      "ARTIFACT_UNAVAILABLE",
+      "GitHub did not provide an artifact download",
+    );
+  const url = new URL(response.headers.get("location") ?? "");
+  if (
+    url.protocol !== "https:" ||
+    url.username ||
+    url.password ||
+    (url.port && url.port !== "443") ||
+    !(
+      url.hostname.endsWith(".blob.core.windows.net") ||
+      url.hostname.endsWith(".actions.githubusercontent.com")
+    )
+  )
+    throw new HttpError(
+      502,
+      "ARTIFACT_UNAVAILABLE",
+      "Unsupported artifact storage host",
+    );
+  const bytes = await boundedBody(
+    await fetch(url, { redirect: "error", signal: AbortSignal.timeout(15000) }),
+  );
+  const report = await readArtifactReport(bytes, runId);
+  if (report.attempt !== (run.runAttempt ?? 1))
+    throw new HttpError(
+      422,
+      "EVIDENCE_MISMATCH",
+      "Report attempt differs from selected run",
+    );
+  return uploadTestReport(projectId, assessmentId, report, {
+    userId: project.userId.toString(),
+    generation,
+    artifactId,
+  });
 }

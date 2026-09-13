@@ -21,6 +21,7 @@
     "mongoose": "^8.19.0",
     "openai": "^7.15.0",
     "typescript": "^5.9.0",
+    "yauzl": "^3.4.0",
     "zod": "^4.1.0"
   },
   "devDependencies": {
@@ -28,6 +29,7 @@
     "@types/express": "^5.0.0",
     "@types/node": "^22.0.0",
     "@types/supertest": "^6.0.0",
+    "@types/yauzl": "^3.4.0",
     "supertest": "^7.1.0",
     "tsx": "^4.20.0",
     "vitest": "^5.0.0"

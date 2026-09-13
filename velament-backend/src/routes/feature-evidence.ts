@@ -1,3 +1,4 @@
+import { importArtifactReport } from "../services/artifact.service.js";
 import { batchSource } from "../services/discovery-source.js";
 import {
   planRepositoryDiscovery,
@@ -507,6 +508,24 @@ featureEvidence.get(
       data: await getDiscovery(
         res.locals.projectId,
         objectId.parse(req.params.id),
+      ),
+    });
+  },
+);
+
+featureEvidence.post(
+  "/projects/:projectId/assessments/:id/import-report",
+  async (req, res) => {
+    const input = z
+      .object({ runId: objectId, artifactId: z.number().int().positive() })
+      .strict()
+      .parse(req.body);
+    res.json({
+      data: await importArtifactReport(
+        res.locals.projectId,
+        objectId.parse(req.params.id),
+        input.runId,
+        input.artifactId,
       ),
     });
   },

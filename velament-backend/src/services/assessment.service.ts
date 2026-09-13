@@ -1,3 +1,5 @@
+import { Project } from "../models/Project.js";
+import { assertAccess } from "./access.service.js";
 import mongoose from "mongoose";
 import { testReportInput } from "@velament/shared";
 import { Feature } from "../models/Feature.js";
@@ -126,9 +128,29 @@ export async function uploadTestReport(
   projectId: string,
   id: string,
   value: unknown,
+  artifact?: { userId: string; generation: number; artifactId: number },
 ) {
   const input = testReportInput.parse(value);
   await mongoose.connection.transaction(async (session) => {
+    if (artifact) {
+      await assertAccess(artifact.userId, artifact.generation, session);
+      const active = await Project.updateOne(
+        {
+          _id: projectId,
+          userId: artifact.userId,
+          archivedAt: null,
+          deletingAt: null,
+        },
+        { $inc: { __v: 1 } },
+        { session },
+      );
+      if (!active.matchedCount)
+        throw new HttpError(
+          409,
+          "PROJECT_UNAVAILABLE",
+          "Project changed during import",
+        );
+    }
     const assessment = await FeatureAssessment.findOne({
       _id: id,
       projectId,
@@ -164,7 +186,8 @@ export async function uploadTestReport(
         $set: {
           testReport: {
             ...input,
-            provenance: "user-uploaded",
+            provenance: artifact ? "github-artifact" : "user-uploaded",
+            artifactId: artifact?.artifactId,
             receivedAt: new Date(),
             outcome: input.tests.some((t) => t.outcome === "failed")
               ? "failed"
