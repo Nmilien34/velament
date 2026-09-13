@@ -1,3 +1,4 @@
+import { revokeAccess } from "../src/services/access.service.js";
 import { Investigation } from "../src/models/Investigation.js";
 import { diagnoseWithAI } from "../src/services/ai-diagnosis.service.js";
 vi.mock("../src/services/ai-diagnosis.service.js", () => ({
@@ -265,6 +266,82 @@ describe.skipIf(!uri)("AI recovery", () => {
         ).status,
       ).toBe(404);
     } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+  it.each(
+    ["revoke", "archive", "delete"].flatMap((change) =>
+      ["discovery", "diagnosis"].map((kind) => ({ change, kind })),
+    ),
+  )("rejects late $kind results after $change", async ({ change, kind }) => {
+    await AiDiscovery.deleteMany({ projectId, revisionId });
+    vi.stubEnv("OPENAI_API_KEY", "test-only");
+    const changeAccess = async () => {
+      const project = await Project.findById(projectId);
+      if (change === "revoke") await revokeAccess(project!.userId.toString());
+      else
+        await Project.updateOne(
+          { _id: projectId },
+          {
+            $set: {
+              [change === "archive" ? "archivedAt" : "deletingAt"]: new Date(),
+            },
+          },
+        );
+    };
+    const result = {
+      limitations: [],
+      provenance: "openai" as const,
+      verification: "unverified" as const,
+      model: "test",
+      usage: null,
+    };
+    vi.mocked(discoverWithAI).mockImplementationOnce(async () => {
+      await changeAccess();
+      return { ...result, features: [] };
+    });
+    vi.mocked(diagnoseWithAI).mockImplementationOnce(async () => {
+      await changeAccess();
+      return {
+        ...result,
+        causes: [],
+        nextSteps: [],
+        prompt: "Investigate",
+        historicalTrace: false,
+      };
+    });
+    const investigation = await Investigation.create({
+      projectId,
+      revisionId,
+      text: "Error",
+      prompt: "Investigate",
+    });
+    try {
+      const response = await request(app)
+        .post(
+          base() +
+            "/revisions/" +
+            revisionId +
+            (kind === "discovery"
+              ? "/ai-discovery"
+              : "/investigations/" + investigation.id + "/ai-diagnosis"),
+        )
+        .set(auth())
+        .send({ paths: ["signup.ts"], allowSourceSharing: true });
+      expect(response.status).toBe(409);
+      const record = await AiDiscovery.findOne({ projectId, revisionId });
+      expect(record?.status).toBe("failed");
+      expect(record?.result).toBeUndefined();
+    } finally {
+      await Project.updateOne(
+        { _id: projectId },
+        {
+          $unset: { archivedAt: 1, deletingAt: 1 },
+          $set: { connectionState: "active" },
+        },
+      );
+      vi.mocked(discoverWithAI).mockReset();
+      vi.mocked(diagnoseWithAI).mockReset();
       vi.unstubAllEnvs();
     }
   });

@@ -1,3 +1,6 @@
+import mongoose from "mongoose";
+import { Project } from "../models/Project.js";
+import { accessGeneration, assertAccess } from "../services/access.service.js";
 import { Investigation } from "../models/Investigation.js";
 import { inspectReality } from "../services/reality.service.js";
 import { RealityReview } from "../models/RealityReview.js";
@@ -237,6 +240,7 @@ featureEvidence.post(
       })
       .strict()
       .parse(req.body);
+    const generation = await accessGeneration(String(res.locals.userId));
     const snapshot = await revision(
       res.locals.projectId,
       objectId.parse(req.params.revisionId),
@@ -358,21 +362,44 @@ featureEvidence.post(
               ).toString() !== snapshot.id,
           })
         : await discoverWithAI(files);
-      const completed = await AiDiscovery.findOneAndUpdate(
-        { _id: record.id, status: "pending", attempt: record.attempt },
-        {
-          $set: {
-            status: "completed",
-            result: {
-              ...result,
-              kind: investigation ? "error-diagnosis" : "feature-discovery",
-              investigationId: investigation?.id,
-              sha: snapshot.sha,
-              limitations: [...snapshot.limitations, ...result.limitations],
+      const completed = await mongoose.connection.transaction(
+        async (session) => {
+          await assertAccess(String(res.locals.userId), generation, session);
+          // Write the project in this transaction so archive/deletion racing this
+          // completion conflicts instead of accepting a stale access check.
+          const active = await Project.updateOne(
+            {
+              _id: res.locals.projectId,
+              userId: res.locals.userId,
+              archivedAt: null,
+              deletingAt: null,
             },
-          },
+            { $inc: { __v: 1 } },
+            { session },
+          );
+          if (!active.matchedCount)
+            throw new HttpError(
+              409,
+              "PROJECT_UNAVAILABLE",
+              "Project access changed during analysis",
+            );
+          return AiDiscovery.findOneAndUpdate(
+            { _id: record.id, status: "pending", attempt: record.attempt },
+            {
+              $set: {
+                status: "completed",
+                result: {
+                  ...result,
+                  kind: investigation ? "error-diagnosis" : "feature-discovery",
+                  investigationId: investigation?.id,
+                  sha: snapshot.sha,
+                  limitations: [...snapshot.limitations, ...result.limitations],
+                },
+              },
+            },
+            { new: true, session },
+          );
         },
-        { new: true },
       );
       if (!completed)
         throw new HttpError(
