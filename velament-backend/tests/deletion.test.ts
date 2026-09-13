@@ -13,6 +13,37 @@ import { User } from "../src/models/User.js";
 import { Job } from "../src/models/Job.js";
 import { Feature } from "../src/models/Feature.js";
 const uri = process.env.TEST_MONGODB_URI;
+it.skipIf(!uri)(
+  "deletion cancels queued analysis and signals running analysis",
+  async () => {
+    const p = await Project.create({
+      userId: new mongoose.Types.ObjectId(),
+      owner: "a",
+      repo: "delete-work",
+      branch: "main",
+      archivedAt: new Date(),
+    });
+    const queued = await Job.create({
+      key: "delete-queued",
+      kind: "analysis",
+      projectId: p.id,
+    });
+    const running = await Job.create({
+      key: "delete-running",
+      kind: "analysis",
+      projectId: p.id,
+      status: "running",
+      leaseToken: "worker",
+      leaseUntil: new Date(Date.now() + 60000),
+    });
+    await requestDeletion(p.userId.toString(), p.id);
+    expect((await Job.findById(queued.id))?.status).toBe("cancelled");
+    const active = await Job.findById(running.id);
+    expect(active?.cancelRequested).toBe(true);
+    expect(active?.status).toBe("running");
+    expect(active?.leaseToken).toBe("worker");
+  },
+);
 beforeAll(async () => {
   if (uri) {
     await mongoose.connect(uri, { dbName: "deletion_" + randomUUID() });

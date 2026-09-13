@@ -49,6 +49,29 @@ export async function requestDeletion(userId: string, projectId?: string) {
           "Project was restored; archive it before deletion",
         );
     }
+    const projects = await Project.find({
+      userId,
+      ...(projectId ? { _id: projectId } : {}),
+    })
+      .select("_id")
+      .session(session);
+    const scope = {
+      projectId: { $in: projects.map((p) => p._id) },
+      kind: "analysis",
+    };
+    await Job.updateMany(
+      { ...scope, status: "queued" },
+      {
+        $set: { status: "cancelled", cancelRequested: true },
+        $unset: { leaseUntil: 1, leaseToken: 1 },
+      },
+      { session },
+    );
+    await Job.updateMany(
+      { ...scope, status: "running" },
+      { $set: { cancelRequested: true } },
+      { session },
+    );
     return Deletion.findOneAndUpdate(
       { key: projectId ? "project:" + projectId : "account:" + userId },
       {
