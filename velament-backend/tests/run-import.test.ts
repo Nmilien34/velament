@@ -9,6 +9,7 @@ import { githubGet } from "../src/services/github.service.js";
 import { importRun } from "../src/services/run.service.js";
 import { Project } from "../src/models/Project.js";
 import { TestRun } from "../src/models/TestRun.js";
+import { revokeAccess } from "../src/services/access.service.js";
 const uri = process.env.TEST_MONGODB_URI;
 let projectId: string;
 beforeAll(async () => {
@@ -65,3 +66,20 @@ it.skipIf(!uri)("rejects a mismatched provider run", async () => {
     code: "GITHUB_RUN_MISMATCH",
   });
 });
+it.skipIf(!uri)(
+  "does not save a response received after revocation",
+  async () => {
+    const p = await Project.findById(projectId);
+    const before = await TestRun.findOne({ projectId }).lean();
+    vi.mocked(githubGet).mockImplementationOnce(async () => {
+      await revokeAccess(p!.userId.toString());
+      return response("completed", 3);
+    });
+    await expect(importRun(projectId, 123)).rejects.toMatchObject({
+      code: "ACCESS_REVOKED",
+    });
+    const after = await TestRun.findOne({ projectId }).lean();
+    expect(after?.runAttempt).toBe(before?.runAttempt);
+    expect(after?.status).toBe(before?.status);
+  },
+);

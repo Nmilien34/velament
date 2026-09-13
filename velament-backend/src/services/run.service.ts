@@ -1,3 +1,5 @@
+import mongoose from "mongoose";
+import { accessGeneration, assertAccess } from "./access.service.js";
 import { repositoryToken } from "./github-app.service.js";
 import { z } from "zod";
 import { Project } from "../models/Project.js";
@@ -13,6 +15,7 @@ export async function importRun(projectId: string, runId: number) {
       "GITHUB_CONNECTION_REQUIRED",
       "Reconnect the project",
     );
+  const generation = await accessGeneration(p.userId.toString());
   const token = await repositoryToken(
     p.userId.toString(),
     p.installationId,
@@ -57,8 +60,8 @@ export async function importRun(projectId: string, runId: number) {
     providerUpdatedAt: new Date(run.updated_at),
     completedAt: run.status === "completed" ? new Date(run.updated_at) : null,
   };
-  // Insert once; concurrent imports can race on the unique provider run key.
-  try {
+  return mongoose.connection.transaction(async (session) => {
+    await assertAccess(p.userId.toString(), generation, session);
     await TestRun.updateOne(
       key,
       {
@@ -69,41 +72,40 @@ export async function importRun(projectId: string, runId: number) {
           provenance: "github-actions",
         },
       },
-      { upsert: true, runValidators: true },
+      { upsert: true, runValidators: true, session },
     );
-  } catch (error) {
-    if ((error as { code?: number }).code !== 11000) throw error;
-  }
-  // Compare in MongoDB, so a delayed response cannot replace a newer attempt
-  // or roll a completed attempt back to an active state.
-  await TestRun.updateOne(
-    {
-      ...key,
-      $or: [
-        { runAttempt: { $lt: run.run_attempt } },
-        {
-          $and: [
-            {
-              $or: [
-                { runAttempt: run.run_attempt },
-                { runAttempt: { $exists: false } },
-              ],
-            },
-            {
-              $or: [
-                { providerUpdatedAt: { $lte: values.providerUpdatedAt } },
-                { providerUpdatedAt: { $exists: false } },
-              ],
-            },
-            ...(run.status === "completed"
-              ? []
-              : [{ status: { $ne: "completed" } }]),
-          ],
-        },
-      ],
-    },
-    { $set: values },
-    { runValidators: true },
-  );
-  return TestRun.findOne(key);
+
+    // Compare in MongoDB, so a delayed response cannot replace a newer attempt
+    // or roll a completed attempt back to an active state.
+    await TestRun.updateOne(
+      {
+        ...key,
+        $or: [
+          { runAttempt: { $lt: run.run_attempt } },
+          {
+            $and: [
+              {
+                $or: [
+                  { runAttempt: run.run_attempt },
+                  { runAttempt: { $exists: false } },
+                ],
+              },
+              {
+                $or: [
+                  { providerUpdatedAt: { $lte: values.providerUpdatedAt } },
+                  { providerUpdatedAt: { $exists: false } },
+                ],
+              },
+              ...(run.status === "completed"
+                ? []
+                : [{ status: { $ne: "completed" } }]),
+            ],
+          },
+        ],
+      },
+      { $set: values },
+      { runValidators: true, session },
+    );
+    return TestRun.findOne(key).session(session);
+  });
 }
