@@ -13,7 +13,7 @@ Compared the prototype's `dist/index.html`, `feature-check.js`, and linked inves
 | Google/GitHub signup, sessions | Provider/session routes and account lifecycle exist | Complete production browser OAuth round trip remains unverified |
 | Connect GitHub, choose repository/branch | GitHub App connection, repository access and branch listing exist | Real webhook delivery and signed-in Actions authorization still need production verification |
 | Analyze and draw codebase | Durable jobs, immutable snapshots, static graph, cancellation and coverage limits | No semantic call graph, workspace aliases or runtime tracing; animation must describe analysis progress rather than pretend to show execution |
-| Discover/add/check a feature | Manual feature library, static candidates, scoped AI discovery, versioned assessments | Resumable snapshot batches exceed the prior 40-file total limit; no cross-batch semantic merging. Oversized files are reported as skipped |
+| Discover/add/check a feature | Manual feature library, static candidates, scoped AI discovery, versioned assessments | Resumable snapshot batches exceed the prior 40-file total limit; no cross-batch semantic merging. Oversized files are split by line; files containing an individually oversized line remain skipped |
 | What's real? | Added static pattern findings and revision-scoped intentional reviews in this change | Heuristics cover literals, selected request/network calls, explicit test doubles and not-implemented errors; arbitrary custom mocks and behavior are not inferred |
 | Explain error visually | Trace-to-source mapping, graph context, historical recheck and scoped AI diagnosis exist | No source-map ingestion or instrumented runtime trace capture |
 | Run tests and show outcome | Workflow listing/dispatch/import/jobs/cancel and uncertain-dispatch reconciliation exist | A branch can move before GitHub checkout; matching run SHA is checked afterward. Workflow success is not feature-level proof |
@@ -36,7 +36,7 @@ These are code/product gaps, not merely missing API keys:
 
 1. Define a trustworthy test-report contract and per-feature test mapping before claiming feature pass/fail. Include exact SHA, attempt, environment, mock boundaries and evidence freshness. Ingest CI reports against that contract.
 2. Automatic comparison on completed analysis is implemented with transactional, deduplicated activity. Opt-in tracked-branch push analysis is implemented. Still needed: feature-targeted test execution. Unchanged source is not a passing feature test.
-3. Resumable repository discovery now exposes deterministic batches, progress and per-batch provenance. Still needed for broader coverage: oversized-file splitting and cross-batch semantic aggregation. Stopping batch submissions pauses work; in-flight provider calls are not recalled.
+3. Resumable repository discovery now exposes deterministic batches, progress and per-batch provenance. Line-based oversized-file splitting is implemented. Still needed for broader coverage: cross-batch semantic aggregation. Stopping batch submissions pauses work; in-flight provider calls are not recalled.
 4. Extend graph resolution with captured configuration and package/workspace rules. Runtime node animation requires actual instrumentation; it cannot be derived from imports.
 
 ## Verification and production boundary

@@ -1,3 +1,4 @@
+import type { SourceRange } from "./discovery-source.js";
 import { summarizeDiscovery } from "./discovery-summary.service.js";
 import { createHash } from "node:crypto";
 import type { SourceFile } from "@velament/shared";
@@ -6,7 +7,7 @@ import { getDiscovery } from "./ai-recovery.service.js";
 
 // Stable ordering and the same scope key as selected-file discovery allow reuse.
 export function planRepositoryDiscovery(files: SourceFile[]) {
-  const batches: { id: string; paths: string[] }[] = [];
+  const batches: { id: string; paths: string[]; ranges?: SourceRange[] }[] = [];
   const skipped: { path: string; reason: string }[] = [];
   let current: SourceFile[] = [];
   const flush = () => {
@@ -23,7 +24,38 @@ export function planRepositoryDiscovery(files: SourceFile[]) {
   )) {
     const source = { path: file.path, content: file.content, hash: file.hash };
     if (Buffer.byteLength(JSON.stringify([source])) > 80000) {
-      skipped.push({ path: file.path, reason: "file-exceeds-batch-limit" });
+      flush();
+      const lines = file.content.split("\n");
+      const ranges: SourceRange[] = [];
+      let start = 0;
+      while (start < lines.length) {
+        let low = start,
+          high = lines.length;
+        while (low < high) {
+          const end = Math.ceil((low + high) / 2);
+          const part = {
+            ...source,
+            content: lines.slice(start, end).join("\n"),
+            startLine: start + 1,
+          };
+          if (Buffer.byteLength(JSON.stringify([part])) <= 80000) low = end;
+          else high = end - 1;
+        }
+        if (low === start) break;
+        ranges.push({ path: file.path, startLine: start + 1, endLine: low });
+        start = low;
+      }
+      if (start < lines.length)
+        skipped.push({ path: file.path, reason: "file-exceeds-batch-limit" });
+      else
+        for (const range of ranges)
+          batches.push({
+            id: createHash("sha256")
+              .update(JSON.stringify(["lines-v1", range]))
+              .digest("hex"),
+            paths: [file.path],
+            ranges: [range],
+          });
       continue;
     }
     if (
@@ -67,9 +99,10 @@ export async function repositoryDiscoveryProgress(
     summary: summarizeDiscovery(batches, files),
     skipped: plan.skipped,
     snapshotFiles: files.length,
-    analyzedFiles: batches
-      .filter((b) => b.status === "completed")
-      .reduce((n, b) => n + b.paths.length, 0),
+    analyzedFiles: files.filter((f) => {
+      const parts = batches.filter((b) => b.paths.includes(f.path));
+      return parts.length > 0 && parts.every((b) => b.status === "completed");
+    }).length,
     complete:
       batches.length > 0 && batches.every((b) => b.status === "completed"),
     nextBatchId: batches.find((b) => b.status !== "completed")?.id ?? null,

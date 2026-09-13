@@ -1,3 +1,4 @@
+import { batchSource, type SourceRange } from "./discovery-source.js";
 import { createHash } from "node:crypto";
 import type { SourceFile } from "@velament/shared";
 import { validateDiscovery } from "./ai-discovery.service.js";
@@ -5,7 +6,13 @@ import { validateDiscovery } from "./ai-discovery.service.js";
 type Candidate = ReturnType<typeof validateDiscovery>["features"][number];
 // Name groups are presentation aids, never a semantic merge or saved feature ID.
 export function summarizeDiscovery(
-  batches: { id: string; paths: string[]; status: string; result: unknown }[],
+  batches: {
+    id: string;
+    paths: string[];
+    ranges?: SourceRange[];
+    status: string;
+    result: unknown;
+  }[],
   files: SourceFile[],
 ) {
   const groups = new Map<
@@ -22,10 +29,7 @@ export function summarizeDiscovery(
     if (batch.status !== "completed") continue;
     let result: ReturnType<typeof validateDiscovery>;
     try {
-      result = validateDiscovery(
-        batch.result,
-        files.filter((f) => batch.paths.includes(f.path)),
-      );
+      result = validateDiscovery(batch.result, batchSource(files, batch));
       if (result.features.some((f) => !f.title.trim()))
         throw new Error("Empty title");
     } catch {

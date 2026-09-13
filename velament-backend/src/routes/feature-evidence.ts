@@ -1,3 +1,4 @@
+import { batchSource } from "../services/discovery-source.js";
 import {
   planRepositoryDiscovery,
   repositoryDiscoveryProgress,
@@ -311,34 +312,38 @@ featureEvidence.post(
         "Batch is not part of this revision's discovery plan",
       );
     const paths = [...new Set(batch?.paths ?? input.paths!)].sort();
-    const files = paths.map((path) => {
-      const file = snapshot.files.find((f) => f.path === path);
-      if (!file)
-        throw new HttpError(
-          422,
-          "SOURCE_UNAVAILABLE",
-          "A selected file is unavailable in this revision",
-        );
-      return { path: file.path, content: file.content, hash: file.hash };
-    });
+    const files = batch
+      ? batchSource(snapshot.files, batch)
+      : paths.map((path) => {
+          const file = snapshot.files.find((f) => f.path === path);
+          if (!file)
+            throw new HttpError(
+              422,
+              "SOURCE_UNAVAILABLE",
+              "A selected file is unavailable in this revision",
+            );
+          return { path: file.path, content: file.content, hash: file.hash };
+        });
     prepareSource(files);
     const filter = {
       projectId: res.locals.projectId,
       revisionId: snapshot.id,
-      scopeKey: createHash("sha256")
-        .update(
-          JSON.stringify(
-            investigation
-              ? [
-                  paths,
-                  investigation.id,
-                  investigation.text,
-                  investigation.traceRevisionId,
-                ]
-              : paths,
-          ),
-        )
-        .digest("hex"),
+      scopeKey:
+        batch?.id ??
+        createHash("sha256")
+          .update(
+            JSON.stringify(
+              investigation
+                ? [
+                    paths,
+                    investigation.id,
+                    investigation.text,
+                    investigation.traceRevisionId,
+                  ]
+                : paths,
+            ),
+          )
+          .digest("hex"),
     };
     const cached = await AiDiscovery.findOne(filter);
     const existing = cached

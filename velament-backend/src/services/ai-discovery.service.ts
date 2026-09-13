@@ -1,7 +1,7 @@
 import OpenAI from "openai";
 import { zodTextFormat } from "openai/helpers/zod";
 import { z } from "zod";
-import type { SourceFile } from "@velament/shared";
+import type { DiscoverySource } from "./discovery-source.js";
 import { HttpError } from "../utils/errors.js";
 const schema = z.object({
   features: z.array(
@@ -19,7 +19,7 @@ const schema = z.object({
   ),
   limitations: z.array(z.string()),
 });
-export function prepareSource(files: SourceFile[]) {
+export function prepareSource(files: DiscoverySource[]) {
   if (
     !files.length ||
     files.length > 40 ||
@@ -32,18 +32,19 @@ export function prepareSource(files: SourceFile[]) {
     );
   return files.map((f) => ({
     path: f.path,
-    lines: f.content.split("\n").map((text, i) => ({ line: i + 1, text })),
+    lines: f.content
+      .split("\n")
+      .map((text, i) => ({ line: i + (f.startLine ?? 1), text })),
   }));
 }
-export function validateDiscovery(value: unknown, files: SourceFile[]) {
+export function validateDiscovery(value: unknown, files: DiscoverySource[]) {
   const parsed = schema.parse(value);
   if (parsed.features.length > 20) throw new Error("Too many candidates");
   for (const feature of parsed.features) {
     if (!feature.references.length) throw new Error("Missing source evidence");
     for (const ref of feature.references) {
-      const line = files.find((f) => f.path === ref.path)?.content.split("\n")[
-        ref.line - 1
-      ];
+      const file = files.find((f) => f.path === ref.path);
+      const line = file?.content.split("\n")[ref.line - (file.startLine ?? 1)];
       if (
         ref.line < 1 ||
         !ref.quote.trim() ||
@@ -55,7 +56,7 @@ export function validateDiscovery(value: unknown, files: SourceFile[]) {
   }
   return parsed;
 }
-export async function discoverWithAI(files: SourceFile[]) {
+export async function discoverWithAI(files: DiscoverySource[]) {
   const source = prepareSource(files);
   if (!process.env.OPENAI_API_KEY)
     throw new HttpError(
