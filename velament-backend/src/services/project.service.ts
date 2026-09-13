@@ -1,4 +1,5 @@
 import mongoose from "mongoose";
+import { protectPins } from "./pin-protection.service.js";
 import { accessGeneration, assertAccess } from "./access.service.js";
 import { Job } from "../models/Job.js";
 import { randomUUID } from "node:crypto";
@@ -172,7 +173,7 @@ export async function analyze(
             "Analysis cancelled or superseded",
           );
       }
-      return Revision.findOneAndUpdate(
+      const saved = await Revision.findOneAndUpdate(
         { projectId, sha: snapshot.sha },
         {
           $setOnInsert: {
@@ -184,6 +185,18 @@ export async function analyze(
         },
         { upsert: true, new: true, runValidators: true, session },
       );
+      if (saved)
+        await protectPins(
+          projectId,
+          {
+            id: saved._id.toString(),
+            branch: saved.branch,
+            files: saved.files,
+            edges: saved.edges,
+          },
+          session,
+        );
+      return saved;
     });
   } finally {
     await Project.updateOne(
