@@ -3,6 +3,7 @@ import { createCiReport } from "../src/services/ci-report.service.js";
 it("creates conservative file summaries tied to commit and attempt", () => {
   const report = createCiReport(
     {
+      success: false,
       testResults: [
         {
           name: "/repo/tests/a.test.ts",
@@ -36,5 +37,24 @@ it("rejects invalid reports instead of publishing success", () => {
   expect(() => createCiReport({}, "a".repeat(40), 1)).toThrow();
   expect(() =>
     createCiReport({ testResults: [] }, "a".repeat(40), 1),
+  ).toThrow();
+});
+
+it("rejects run-level failures even when all file results passed", () => {
+  expect(() =>
+    createCiReport(
+      {
+        success: false,
+        testResults: [
+          {
+            name: "a.test.ts",
+            status: "passed",
+            assertionResults: [{ status: "passed" }],
+          },
+        ],
+      },
+      "a".repeat(40),
+      1,
+    ),
   ).toThrow();
 });

@@ -2,6 +2,7 @@ import path from "node:path";
 import { z } from "zod";
 import { testReportInput } from "@velament/shared";
 const resultsSchema = z.object({
+  success: z.boolean(),
   testResults: z
     .array(
       z.object({
@@ -47,5 +48,12 @@ export function createCiReport(value: unknown, sha: string, attempt: number) {
             : "skipped",
     })),
   });
+  if (
+    !results.success &&
+    !report.tests.some((test) => test.outcome === "failed")
+  )
+    throw new Error(
+      "Run-level failure is not represented by test-file outcomes; no evidence report was generated",
+    );
   return report;
 }
