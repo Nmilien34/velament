@@ -1,3 +1,7 @@
+import {
+  planRepositoryDiscovery,
+  repositoryDiscoveryProgress,
+} from "../services/repository-discovery.service.js";
 import mongoose from "mongoose";
 import { Project } from "../models/Project.js";
 import { accessGeneration, assertAccess } from "../services/access.service.js";
@@ -225,21 +229,58 @@ featureEvidence.delete(
   },
 );
 
+featureEvidence.get(
+  "/projects/:projectId/revisions/:revisionId/repository-discovery",
+  async (req, res) => {
+    const snapshot = await revision(
+      res.locals.projectId,
+      objectId.parse(req.params.revisionId),
+    );
+    res.json({
+      data: {
+        ...(await repositoryDiscoveryProgress(
+          res.locals.projectId,
+          snapshot.id,
+          snapshot.files,
+        )),
+        sha: snapshot.sha,
+        snapshotLimitations: snapshot.limitations,
+      },
+    });
+  },
+);
+
 // Explicit request only: selected revision source is sent to OpenAI.
 featureEvidence.post(
   [
     "/projects/:projectId/revisions/:revisionId/ai-discovery",
+    "/projects/:projectId/revisions/:revisionId/repository-discovery",
     "/projects/:projectId/revisions/:revisionId/investigations/:investigationId/ai-diagnosis",
   ],
   async (req, res) => {
     const input = z
       .object({
-        paths: z.array(z.string().min(1)).min(1).max(40),
+        paths: z.array(z.string().min(1)).min(1).max(40).optional(),
+        batchId: z
+          .string()
+          .regex(/^[a-f0-9]{64}$/)
+          .optional(),
         allowSourceSharing: z.literal(true),
         retryAttempt: z.number().int().positive().optional(),
       })
       .strict()
       .parse(req.body);
+    const repositoryMode = req.path.endsWith("/repository-discovery");
+    if (
+      repositoryMode
+        ? !input.batchId || input.paths !== undefined
+        : !input.paths || input.batchId !== undefined
+    )
+      throw new HttpError(
+        400,
+        "INVALID_SCOPE",
+        "Use batchId for repository discovery and paths for scoped analysis",
+      );
     const generation = await accessGeneration(String(res.locals.userId));
     const snapshot = await revision(
       res.locals.projectId,
@@ -258,7 +299,18 @@ featureEvidence.post(
         "NOT_FOUND",
         "Investigation not found for this revision",
       );
-    const paths = [...new Set(input.paths)].sort();
+    const batch = repositoryMode
+      ? planRepositoryDiscovery(snapshot.files).batches.find(
+          (b) => b.id === input.batchId,
+        )
+      : undefined;
+    if (repositoryMode && !batch)
+      throw new HttpError(
+        422,
+        "INVALID_BATCH",
+        "Batch is not part of this revision's discovery plan",
+      );
+    const paths = [...new Set(batch?.paths ?? input.paths!)].sort();
     const files = paths.map((path) => {
       const file = snapshot.files.find((f) => f.path === path);
       if (!file)

@@ -345,4 +345,105 @@ describe.skipIf(!uri)("AI recovery", () => {
       vi.unstubAllEnvs();
     }
   });
+  it("resumes repository discovery across batches with explicit coverage and cached results", async () => {
+    const snapshot = await Revision.create({
+      projectId,
+      sha: "b".repeat(40),
+      branch: "main",
+      state: "partial",
+      limitations: ["Snapshot excludes files"],
+      files: [
+        ...Array.from({ length: 41 }, (_, i) => ({
+          path: `src/${i}.ts`,
+          hash: String(i),
+          content: "export {};",
+        })),
+        { path: "large.ts", hash: "large", content: "x".repeat(80001) },
+      ],
+      edges: [],
+    });
+    const url = base() + "/revisions/" + snapshot.id + "/repository-discovery";
+    vi.stubEnv("OPENAI_API_KEY", "test-only");
+    vi.mocked(discoverWithAI).mockResolvedValue({
+      features: [],
+      limitations: [],
+      provenance: "openai",
+      verification: "unverified",
+      model: "test",
+      usage: null,
+    });
+    try {
+      expect((await request(app).get(url)).status).toBe(401);
+      let progress = (await request(app).get(url).set(auth())).body.data;
+      expect(progress.batches).toHaveLength(2);
+      expect(progress.skipped).toHaveLength(1);
+      expect(progress.analyzedFiles).toBe(0);
+      expect(discoverWithAI).not.toHaveBeenCalled();
+      expect(
+        (
+          await request(app)
+            .post(url)
+            .set(auth())
+            .send({ batchId: progress.nextBatchId })
+        ).status,
+      ).toBe(400);
+      expect(
+        (
+          await request(app)
+            .post(url)
+            .set(auth())
+            .send({ batchId: "0".repeat(64), allowSourceSharing: true })
+        ).status,
+      ).toBe(422);
+      const firstId = progress.nextBatchId;
+      await AiDiscovery.create({
+        projectId,
+        revisionId: snapshot.id,
+        scopeKey: firstId,
+        status: "pending",
+        startedAt: new Date(Date.now() - 180000),
+      });
+      progress = (await request(app).get(url).set(auth())).body.data;
+      expect(progress.batches[0].status).toBe("failed");
+      const interrupted = await request(app)
+        .post(url)
+        .set(auth())
+        .send({ batchId: firstId, allowSourceSharing: true });
+      expect(interrupted.body.data.status).toBe("failed");
+      expect(discoverWithAI).not.toHaveBeenCalled();
+      for (let i = 0; i < 2; i++) {
+        const response = await request(app)
+          .post(url)
+          .set(auth())
+          .send({
+            batchId: progress.nextBatchId,
+            allowSourceSharing: true,
+            ...(i === 0 ? { retryAttempt: 1 } : {}),
+          });
+        expect(response.status).toBe(201);
+        progress = (await request(app).get(url).set(auth())).body.data;
+        expect(
+          progress.batches.filter(
+            (b: { status: string }) => b.status === "completed",
+          ),
+        ).toHaveLength(i + 1);
+      }
+      expect(progress.complete).toBe(true);
+      expect(progress.nextBatchId).toBeNull();
+      expect(progress.analyzedFiles).toBe(41);
+      expect(progress.snapshotFiles).toBe(42);
+      expect(progress.verification).toBe("unverified");
+      expect(
+        (
+          await request(app)
+            .post(url)
+            .set(auth())
+            .send({ batchId: firstId, allowSourceSharing: true })
+        ).status,
+      ).toBe(200);
+      expect(discoverWithAI).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
 });
