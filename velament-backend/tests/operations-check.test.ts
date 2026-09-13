@@ -14,6 +14,33 @@ afterEach(() => {
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
 });
+it.each([undefined, -1, "invalid"])(
+  "rejects malformed counters: %s",
+  async (failed) => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: true,
+        json: async () => ({
+          data: {
+            deployment: { commit: "a".repeat(40) },
+            deletions: { pending: 0, overdue: 0 },
+            queue: { failed, expiredLeases: 0, oldestReadyAgeSeconds: 0 },
+            worker: {
+              started: true,
+              heartbeatAgeSeconds: 1,
+              pollingFailures: 0,
+            },
+            unknownDispatches: 0,
+            stalePendingDispatches: 0,
+          },
+        }),
+      }),
+    );
+    await import("../src/scripts/check-operations.js");
+    expect(process.exitCode).toBe(1);
+  },
+);
 it.each(["a".repeat(40), "b".repeat(40), null])(
   "verifies deployed commit %s",
   async (commit) => {

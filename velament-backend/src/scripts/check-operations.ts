@@ -1,3 +1,4 @@
+import { z } from "zod";
 import { config } from "dotenv";
 config({ path: ".env", quiet: true });
 const base = process.env.OPERATIONS_URL,
@@ -16,24 +17,34 @@ try {
     redirect: "error",
   });
   if (!response.ok) throw new Error("Metrics unavailable");
-  const metrics = (await response.json()) as {
-    data: {
-      deployment?: { commit: string | null };
-      deletions: { pending: number; overdue: number };
-      queue: {
-        failed: number;
-        expiredLeases: number;
-        oldestReadyAgeSeconds: number;
-      };
-      stalePendingDispatches: number;
-      worker: {
-        started: boolean;
-        heartbeatAgeSeconds: number | null;
-        pollingFailures: number;
-      };
-      unknownDispatches: number;
-    };
-  };
+  const count = z.number().int().nonnegative();
+  const metrics = z
+    .object({
+      data: z.object({
+        deployment: z
+          .object({
+            commit: z
+              .string()
+              .regex(/^[a-f0-9]{40}$/i)
+              .nullable(),
+          })
+          .optional(),
+        deletions: z.object({ pending: count, overdue: count }),
+        queue: z.object({
+          failed: count,
+          expiredLeases: count,
+          oldestReadyAgeSeconds: count,
+        }),
+        stalePendingDispatches: count,
+        worker: z.object({
+          started: z.boolean(),
+          heartbeatAgeSeconds: count.nullable(),
+          pollingFailures: count,
+        }),
+        unknownDispatches: count,
+      }),
+    })
+    .parse(await response.json());
   const q = metrics.data.queue;
   const expected = process.env.OPERATIONS_EXPECTED_COMMIT;
   if (
