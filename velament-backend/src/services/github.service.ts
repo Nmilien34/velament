@@ -29,7 +29,12 @@ export async function readRepository(
   repo: string,
   branch: string,
   token: string,
+  control?: { checkpoint: () => Promise<void> },
 ) {
+  const get = async (endpoint: string, credential: string) => {
+    await control?.checkpoint();
+    return githubGet(endpoint, credential);
+  };
   const base =
     "/repos/" + encodeURIComponent(owner) + "/" + encodeURIComponent(repo);
   const commit = z
@@ -37,9 +42,7 @@ export async function readRepository(
       sha: z.string(),
       commit: z.object({ tree: z.object({ sha: z.string() }) }),
     })
-    .parse(
-      await githubGet(base + "/commits/" + encodeURIComponent(branch), token),
-    );
+    .parse(await get(base + "/commits/" + encodeURIComponent(branch), token));
   let tree = z
     .object({
       truncated: z.boolean(),
@@ -53,7 +56,7 @@ export async function readRepository(
       ),
     })
     .parse(
-      await githubGet(
+      await get(
         base + "/git/trees/" + commit.commit.tree.sha + "?recursive=1",
         token,
       ),
@@ -78,7 +81,7 @@ export async function readRepository(
             }),
           ),
         })
-        .parse(await githubGet(base + "/git/trees/" + current.sha, token));
+        .parse(await get(base + "/git/trees/" + current.sha, token));
       requests++;
       incomplete ||= subtree.truncated;
       for (const entry of subtree.tree) {
@@ -106,7 +109,7 @@ export async function readRepository(
   for (const entry of selected) {
     const blob = z
       .object({ content: z.string(), encoding: z.literal("base64") })
-      .parse(await githubGet(base + "/git/blobs/" + entry.sha, token));
+      .parse(await get(base + "/git/blobs/" + entry.sha, token));
     const content = Buffer.from(blob.content, "base64").toString("utf8");
     const size = Buffer.byteLength(content);
     if (size > 100000 || bytes + size > 4000000) continue;

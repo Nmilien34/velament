@@ -1,3 +1,5 @@
+import { processDeletion } from "./deletion.service.js";
+import { revokeAccess } from "./access.service.js";
 import { randomUUID } from "node:crypto";
 import { Job } from "../models/Job.js";
 import { Activity } from "../models/Activity.js";
@@ -48,7 +50,10 @@ async function webhook(payload: unknown, deliveryKey: string) {
     p.body.action === "revoked" &&
     p.body.sender
   ) {
-    await GitHubConnection.deleteMany({ githubUserId: p.body.sender.id });
+    const connections = await GitHubConnection.find({
+      githubUserId: p.body.sender.id,
+    }).select("userId");
+    for (const c of connections) await revokeAccess(c.userId.toString());
     return;
   }
   if (!p.body.installation) return;
@@ -106,7 +111,18 @@ async function webhook(payload: unknown, deliveryKey: string) {
       await importRun(project.id, p.body.workflow_run.id);
   }
 }
-export async function processNextJob() {
+export const workerState = { started: false, lastHeartbeat: 0, failures: 0 };
+export async function processNextJob(kind?: "analysis" | "webhook") {
+  await Job.updateMany(
+    {
+      cancelRequested: true,
+      $or: [
+        { status: "queued" },
+        { status: "running", leaseUntil: { $lt: new Date() } },
+      ],
+    },
+    { $set: { status: "cancelled" }, $unset: { leaseUntil: 1, leaseToken: 1 } },
+  );
   await Job.updateMany(
     {
       status: "running",
@@ -122,6 +138,7 @@ export async function processNextJob() {
   const leaseToken = randomUUID();
   const job = await Job.findOneAndUpdate(
     {
+      ...(kind ? { kind } : {}),
       attempts: { $lt: 3 },
       $or: [
         { status: "queued", availableAt: { $lte: now } },
@@ -205,32 +222,43 @@ export async function processNextJob() {
   return true;
 }
 export function startWorker() {
-  let stopped = false,
-    timer: ReturnType<typeof setTimeout> | undefined;
-  let running: Promise<void> = Promise.resolve();
-  const loop = () => {
-    running = (async () => {
+  workerState.started = true;
+  workerState.lastHeartbeat = Date.now();
+  let stopped = false;
+  const timers = new Set<ReturnType<typeof setTimeout>>();
+  const running = new Set<Promise<void>>();
+  const heartbeat = setInterval(() => {
+    workerState.lastHeartbeat = Date.now();
+  }, 5000);
+  heartbeat.unref();
+  function loop(kind: "analysis" | "webhook") {
+    const task = (async () => {
       try {
-        await processNextJob();
-        await Job.updateMany(
-          {
-            status: "running",
-            attempts: { $gte: 3 },
-            leaseUntil: { $lt: new Date() },
-          },
-          { $set: { status: "failed", errorCode: "WORKER_INTERRUPTED" } },
-        );
+        await processNextJob(kind);
+        if (kind === "webhook") await processDeletion();
       } catch {
-        console.error("Worker polling failed");
+        workerState.failures++;
+        console.error("Worker polling failed", { kind });
       }
-      if (!stopped) timer = setTimeout(loop, 1000);
+      if (!stopped) {
+        const timer = setTimeout(() => {
+          timers.delete(timer);
+          loop(kind);
+        }, 1000);
+        timers.add(timer);
+      }
     })();
-  };
-  loop();
+    running.add(task);
+    void task.finally(() => running.delete(task));
+  }
+  loop("analysis");
+  loop("webhook");
   return async () => {
     stopped = true;
-    clearTimeout(timer);
-    await running;
+    for (const timer of timers) clearTimeout(timer);
+    await Promise.all(running);
+    clearInterval(heartbeat);
+    workerState.started = false;
   };
 }
 

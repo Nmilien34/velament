@@ -1,4 +1,5 @@
 import mongoose from "mongoose";
+import { accessGeneration, assertAccess } from "./access.service.js";
 import { Job } from "../models/Job.js";
 import { randomUUID } from "node:crypto";
 import { repositoryToken } from "./github-app.service.js";
@@ -12,6 +13,7 @@ export async function ownProject(userId: string, id: string) {
     _id: id,
     userId,
     archivedAt: { $exists: false },
+    deletingAt: null,
   });
   if (!p) throw new HttpError(404, "NOT_FOUND", "Project not found");
   return p;
@@ -69,16 +71,61 @@ export async function analyze(
         "GITHUB_CONNECTION_REQUIRED",
         "Reconnect this project using its GitHub installation",
       );
+    const generation = await accessGeneration(lock.userId.toString());
+    const deadline = Date.now() + 10 * 60 * 1000;
+    const checkpoint = async () => {
+      if (Date.now() > deadline)
+        throw new HttpError(
+          422,
+          "ANALYSIS_TIMEOUT",
+          "Analysis exceeded ten minutes; narrow the repository scope",
+        );
+      if (jobScope) {
+        const active = await Job.updateOne(
+          {
+            _id: jobScope.id,
+            leaseToken: jobScope.leaseToken,
+            status: "running",
+            cancelRequested: false,
+          },
+          { $set: { leaseUntil: new Date(Date.now() + 1200000) } },
+        );
+        if (!active.matchedCount)
+          throw new HttpError(
+            409,
+            "ANALYSIS_CANCELLED",
+            "Analysis cancelled or superseded",
+          );
+      }
+      const active = await Project.updateOne(
+        {
+          _id: projectId,
+          analysisLockToken: lockToken,
+          archivedAt: null,
+          connectionState: { $ne: "unavailable" },
+        },
+        { $set: { analysisLockedUntil: new Date(Date.now() + 900000) } },
+      );
+      if (!active.matchedCount)
+        throw new HttpError(
+          409,
+          "ANALYSIS_LEASE_LOST",
+          "Analysis access changed",
+        );
+    };
     const token = await repositoryToken(
       lock.userId.toString(),
       lock.installationId,
       lock.repositoryId,
+      "read",
+      checkpoint,
     );
     const snapshot = await readRepository(
       lock.owner,
       lock.repo,
       requestedBranch,
       token,
+      { checkpoint },
     );
     const edges = buildEdges(snapshot.files);
     if (Buffer.byteLength(JSON.stringify({ ...snapshot, edges })) > 8000000)
@@ -88,6 +135,7 @@ export async function analyze(
         "Snapshot and graph exceed the storage budget",
       );
     return await mongoose.connection.transaction(async (session) => {
+      await assertAccess(lock.userId.toString(), generation, session);
       const ownsLease = await Project.findOneAndUpdate(
         {
           _id: projectId,

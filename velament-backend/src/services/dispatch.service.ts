@@ -99,9 +99,12 @@ export async function dispatch(projectId: string, key: string, body: unknown) {
     record.status = "accepted";
     if (result.workflow_run_id) record.githubRunId = result.workflow_run_id;
     await record.save();
-  } catch {
-    record.status = "unknown";
-    record.errorCode = "DISPATCH_UNCERTAIN";
+  } catch (error) {
+    const status = (error as { providerStatus?: number }).providerStatus;
+    const rejected =
+      status !== undefined && [400, 401, 403, 404, 422, 429].includes(status);
+    record.status = rejected ? "rejected" : "unknown";
+    record.errorCode = rejected ? "DISPATCH_REJECTED" : "DISPATCH_UNCERTAIN";
     await record.save();
   }
   return record;
@@ -131,6 +134,88 @@ export async function refreshDispatch(projectId: string, dispatchId: string) {
     dispatch: record,
     run,
     revisionMatches: run?.sha === record.sha,
+    verification:
+      run?.sha === record.sha ? "revision-matched" : "revision-mismatch",
+    eligibleAsApprovedRevisionEvidence: run?.sha === record.sha,
     recovery: "provider-run-id" as const,
+  };
+}
+
+export async function reconcileDispatch(
+  projectId: string,
+  id: string,
+  runId: number,
+) {
+  const record = await Dispatch.findOne({
+    _id: id,
+    projectId,
+    status: { $in: ["pending", "unknown"] },
+  });
+  if (!record)
+    throw new HttpError(
+      409,
+      "DISPATCH_NOT_UNCERTAIN",
+      "Refresh dispatch before reconciling",
+    );
+  const { base, token } = await workflowAccess(projectId);
+  const workflow = z
+    .object({ id: z.number() })
+    .parse(
+      await githubRequest(
+        base + "/actions/workflows/" + encodeURIComponent(record.workflowId),
+        token,
+      ),
+    );
+  const run = z
+    .object({
+      id: z.number(),
+      workflow_id: z.number(),
+      event: z.string(),
+      head_sha: z.string(),
+      created_at: z.string(),
+    })
+    .parse(await githubRequest(base + "/actions/runs/" + runId, token));
+  if (
+    run.id !== runId ||
+    run.workflow_id !== workflow.id ||
+    run.event !== "workflow_dispatch" ||
+    !Number.isFinite(Date.parse(run.created_at)) ||
+    Date.parse(run.created_at) < record.createdAt.getTime() - 60000
+  )
+    throw new HttpError(
+      422,
+      "RUN_MISMATCH",
+      "Run does not match this workflow submission",
+    );
+  await Dispatch.updateOne(
+    { _id: id, projectId, status: { $in: ["pending", "unknown"] } },
+    {
+      $set: {
+        githubRunId: runId,
+        status: "accepted",
+        resolution: "user-associated",
+        resolvedAt: new Date(),
+      },
+      $unset: { errorCode: 1 },
+    },
+  );
+  return refreshDispatch(projectId, id);
+}
+export async function dismissDispatch(projectId: string, id: string) {
+  const record = await Dispatch.findOneAndUpdate(
+    { _id: id, projectId, status: "unknown" },
+    { $set: { resolution: "user-dismissed", resolvedAt: new Date() } },
+    { new: true },
+  );
+  if (!record)
+    throw new HttpError(
+      409,
+      "DISPATCH_NOT_UNCERTAIN",
+      "Only uncertain submissions can be acknowledged",
+    );
+  return {
+    dispatch: record,
+    warning:
+      "Acknowledged only. This does not prove no workflow ran; inspect GitHub before submitting another run.",
   };
 }

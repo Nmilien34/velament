@@ -1,3 +1,5 @@
+import { requestDeletion } from "../services/deletion.service.js";
+import { z } from "zod";
 import type { AccountProfile, SessionSummary } from "@velament/shared";
 import { Router } from "express";
 import { objectId } from "@velament/shared";
@@ -59,4 +61,21 @@ account.post("/sessions/revoke-others", async (_req, res) => {
     _id: { $ne: res.locals.sessionId },
   });
   res.sendStatus(204);
+});
+
+account.delete("/me", async (req, res) => {
+  z.object({ confirm: z.literal("DELETE MY ACCOUNT") })
+    .strict()
+    .parse(req.body);
+  const deletion = await requestDeletion(res.locals.userId);
+  res
+    .clearCookie(sessionCookieName(), cookieOptions())
+    .status(202)
+    .json({
+      data: {
+        id: deletion!.id,
+        status: "deletion-pending",
+        dueAt: deletion!.dueAt,
+      },
+    });
 });

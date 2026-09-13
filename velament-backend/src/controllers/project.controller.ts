@@ -78,11 +78,20 @@ export const analyzeProject: RequestHandler = async (req, res) => {
     .status(202)
     .json({ data: await enqueueAnalysis(res.locals.projectId, key) });
 };
-export const listRevisions: RequestHandler = async (_req, res) => {
+export const listRevisions: RequestHandler = async (req, res) => {
+  const page = z.coerce
+    .number()
+    .int()
+    .min(1)
+    .max(10000)
+    .default(1)
+    .parse(req.query.page);
   res.json({
     data: await Revision.find({ projectId: res.locals.projectId })
       .select("-files.content -edges")
       .sort({ createdAt: -1 })
+      .skip((page - 1) * 25)
       .limit(25),
+    page,
   });
 };

@@ -18,12 +18,28 @@ try {
   if (!response.ok) throw new Error("Metrics unavailable");
   const metrics = (await response.json()) as {
     data: {
-      queue: { expiredLeases: number; oldestReadyAgeSeconds: number };
+      queue: {
+        failed: number;
+        expiredLeases: number;
+        oldestReadyAgeSeconds: number;
+      };
+      stalePendingDispatches: number;
+      worker: {
+        started: boolean;
+        heartbeatAgeSeconds: number | null;
+        pollingFailures: number;
+      };
       unknownDispatches: number;
     };
   };
   const q = metrics.data.queue;
   if (
+    q.failed > 0 ||
+    !metrics.data.worker?.started ||
+    metrics.data.worker.heartbeatAgeSeconds === null ||
+    metrics.data.worker.heartbeatAgeSeconds > 30 ||
+    metrics.data.worker.pollingFailures > 0 ||
+    metrics.data.stalePendingDispatches > 0 ||
     q.expiredLeases > 0 ||
     q.oldestReadyAgeSeconds > 300 ||
     metrics.data.unknownDispatches > 0

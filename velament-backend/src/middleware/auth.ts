@@ -1,3 +1,4 @@
+import { User } from "../models/User.js";
 import type { RequestHandler } from "express";
 import { createHash } from "node:crypto";
 import { readCookie, sessionCookieName } from "../utils/cookies.js";
@@ -32,6 +33,8 @@ export const authenticate: RequestHandler = async (req, res, next) => {
   });
   if (!session)
     throw new HttpError(401, "UNAUTHENTICATED", "Session expired or revoked");
+  if (await User.exists({ _id: session.userId, deletingAt: { $type: "date" } }))
+    throw new HttpError(401, "ACCOUNT_DELETING", "Account deletion is pending");
   res.set("Cache-Control", "no-store");
   res.locals.userId = session.userId.toString();
   res.locals.sessionId = session.id;

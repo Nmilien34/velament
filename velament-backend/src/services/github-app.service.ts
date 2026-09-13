@@ -71,8 +71,8 @@ export async function githubRequest(
     redirect: "error",
     signal: AbortSignal.timeout(15000),
   });
-  if (!response.ok)
-    throw new HttpError(
+  if (!response.ok) {
+    const error = new HttpError(
       response.status === 401
         ? 401
         : response.status === 404
@@ -87,6 +87,8 @@ export async function githubRequest(
           ? "Repository or installation is not accessible"
           : "GitHub request unavailable; check permissions or retry after the rate-limit reset",
     );
+    throw Object.assign(error, { providerStatus: response.status });
+  }
   if (response.status === 204 || response.status === 202) return {};
   return response.json() as Promise<unknown>;
 }
@@ -191,9 +193,11 @@ export async function repositoryToken(
   installationId: number,
   repositoryId: number,
   actions: "read" | "write" = "read",
+  checkpoint?: () => Promise<void>,
 ) {
   let found = false;
   for (let page = 1; page <= 100; page++) {
+    await checkpoint?.();
     const result = z
       .object({ repositories: z.array(z.object({ id: z.number() })) })
       .parse(await repositories(userId, installationId, page));
@@ -209,6 +213,7 @@ export async function repositoryToken(
       "REPOSITORY_ACCESS_DENIED",
       "Repository is not accessible to this user and installation",
     );
+  await checkpoint?.();
   const config = appConfig(),
     now = Math.floor(Date.now() / 1000);
   const header = Buffer.from(

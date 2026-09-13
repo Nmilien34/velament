@@ -18,6 +18,7 @@ export const GitHubState = model(
   "GitHubState",
   new Schema({
     userId: { type: Schema.Types.ObjectId, required: true },
+    generation: { type: Number, default: 0 },
     hash: { type: String, required: true, unique: true },
     verifier: { type: String, required: true },
     browserHash: { type: String, required: true },

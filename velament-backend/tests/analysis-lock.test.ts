@@ -69,7 +69,13 @@ describe.skipIf(!uri)("analysis lease ownership", () => {
       "replacement",
     );
     expect(await Revision.countDocuments()).toBe(0);
-    expect(readRepository).toHaveBeenCalledWith("acme", "app", "main", "token");
+    expect(readRepository).toHaveBeenCalledWith(
+      "acme",
+      "app",
+      "main",
+      "token",
+      { checkpoint: expect.any(Function) },
+    );
   });
   it("does not save a snapshot when access is removed during fetching", async () => {
     const p = await Project.create({

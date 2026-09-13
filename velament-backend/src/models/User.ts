@@ -1,6 +1,7 @@
 import { Schema, model } from "mongoose";
 const schema = new Schema(
   {
+    deletingAt: Date,
     email: {
       type: String,
       required: true,

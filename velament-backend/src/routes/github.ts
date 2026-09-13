@@ -1,5 +1,10 @@
-import { Project } from "../models/Project.js";
-import { Job } from "../models/Job.js";
+import { User } from "../models/User.js";
+import mongoose from "mongoose";
+import {
+  accessGeneration,
+  assertAccess,
+  revokeAccess,
+} from "../services/access.service.js";
 import { rateLimit } from "../middleware/rate-limit.js";
 import { cookieOptions, readCookie } from "../utils/cookies.js";
 import { Router } from "express";
@@ -31,6 +36,7 @@ github.post(
       browser = randomBytes(32).toString("base64url");
     await GitHubState.create({
       userId: res.locals.userId,
+      generation: await accessGeneration(res.locals.userId),
       hash: digest(state),
       browserHash: digest(browser),
       verifier,
@@ -124,33 +130,48 @@ github.get("/callback", async (req, res) => {
   const user = z
     .object({ id: z.number() })
     .parse(await githubRequest("/user", token.data.access_token));
-  await GitHubConnection.findOneAndUpdate(
-    { userId: state.userId },
-    {
-      $unset: {
-        refreshLockedUntil: 1,
-        ...(!token.data.refresh_token
-          ? { refreshToken: 1, refreshExpiresAt: 1 }
-          : {}),
+  await mongoose.connection.transaction(async (session) => {
+    await assertAccess(state.userId.toString(), state.generation ?? 0, session);
+    if (
+      await User.exists({
+        _id: state.userId,
+        deletingAt: { $type: "date" },
+      }).session(session)
+    )
+      throw new HttpError(
+        409,
+        "ACCOUNT_DELETING",
+        "Account deletion is pending",
+      );
+    await GitHubConnection.findOneAndUpdate(
+      { userId: state.userId },
+      {
+        $unset: {
+          refreshLockedUntil: 1,
+          ...(!token.data.refresh_token
+            ? { refreshToken: 1, refreshExpiresAt: 1 }
+            : {}),
+        },
+        $set: {
+          githubUserId: user.id,
+          ...(token.data.refresh_token
+            ? {
+                refreshToken: encrypt(token.data.refresh_token),
+                refreshExpiresAt: new Date(
+                  Date.now() +
+                    (token.data.refresh_token_expires_in ?? 0) * 1000,
+                ),
+              }
+            : {}),
+          token: encrypt(token.data.access_token),
+          expiresAt: new Date(
+            Date.now() + (token.data.expires_in ?? 28800) * 1000,
+          ),
+        },
       },
-      $set: {
-        githubUserId: user.id,
-        ...(token.data.refresh_token
-          ? {
-              refreshToken: encrypt(token.data.refresh_token),
-              refreshExpiresAt: new Date(
-                Date.now() + (token.data.refresh_token_expires_in ?? 0) * 1000,
-              ),
-            }
-          : {}),
-        token: encrypt(token.data.access_token),
-        expiresAt: new Date(
-          Date.now() + (token.data.expires_in ?? 28800) * 1000,
-        ),
-      },
-    },
-    { upsert: true, runValidators: true },
-  );
+      { upsert: true, runValidators: true, session },
+    );
+  });
   res.set("Cache-Control", "no-store").json({
     data: {
       connected: true,
@@ -212,23 +233,7 @@ github.get("/connection", authenticate, async (_req, res) => {
   });
 });
 github.delete("/connection", authenticate, async (_req, res) => {
-  await GitHubConnection.deleteOne({ userId: res.locals.userId });
-  await GitHubState.deleteMany({ userId: res.locals.userId });
-  await Project.updateMany(
-    { userId: res.locals.userId },
-    { $set: { connectionState: "unavailable" } },
-  );
-  const projects = await Project.find({ userId: res.locals.userId }).select(
-    "_id",
-  );
-  await Job.updateMany(
-    {
-      projectId: { $in: projects.map((project) => project._id) },
-      kind: "analysis",
-      status: { $in: ["queued", "running"] },
-    },
-    { $set: { cancelRequested: true } },
-  );
+  await revokeAccess(res.locals.userId);
   res.sendStatus(204);
 });
 

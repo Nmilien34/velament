@@ -13,7 +13,12 @@ import { randomBytes } from "node:crypto";
 vi.mock("../src/services/run.service.js", () => ({ importRun: vi.fn() }));
 import { importRun } from "../src/services/run.service.js";
 import { Dispatch } from "../src/models/Dispatch.js";
-import { dispatch, refreshDispatch } from "../src/services/dispatch.service.js";
+import {
+  dispatch,
+  refreshDispatch,
+  reconcileDispatch,
+  dismissDispatch,
+} from "../src/services/dispatch.service.js";
 const uri = process.env.TEST_MONGODB_URI;
 describe.skipIf(!uri)("dispatch recovery", () => {
   const projectId = new mongoose.Types.ObjectId().toString();
@@ -53,6 +58,8 @@ describe.skipIf(!uri)("dispatch recovery", () => {
     vi.mocked(importRun).mockResolvedValue({ sha: "b".repeat(40) } as never);
     const result = await refreshDispatch(projectId, d.id);
     expect(result.revisionMatches).toBe(false);
+    expect(result.eligibleAsApprovedRevisionEvidence).toBe(false);
+    expect(result.verification).toBe("revision-mismatch");
     expect(importRun).toHaveBeenCalledWith(projectId, 12);
   });
   it("does not expose another project's dispatch", async () => {
@@ -127,5 +134,63 @@ describe.skipIf(!uri)("dispatch recovery", () => {
       r.status === "fulfilled" ? r.value.id : null,
     );
     expect(ids[0]).toBe(ids[1]);
+  });
+  it("classifies a definitive provider rejection without claiming uncertainty", async () => {
+    vi.mocked(githubRequest)
+      .mockReset()
+      .mockResolvedValueOnce({ sha: "a".repeat(40) })
+      .mockRejectedValueOnce(
+        Object.assign(new Error("rejected"), { providerStatus: 422 }),
+      );
+    const record = await dispatch(projectId, "rejected-run", {
+      workflowId: "test.yml",
+      ref: "main",
+      sha: "a".repeat(40),
+    });
+    expect(record.status).toBe("rejected");
+    expect(record.errorCode).toBe("DISPATCH_REJECTED");
+  });
+  it("associates an inspected workflow run without submitting another workflow", async () => {
+    const d = await Dispatch.create({
+      projectId,
+      key: "reconcile",
+      workflowId: "test.yml",
+      ref: "main",
+      sha: "a".repeat(40),
+      status: "unknown",
+    });
+    vi.mocked(githubRequest)
+      .mockReset()
+      .mockResolvedValueOnce({ id: 42 })
+      .mockResolvedValueOnce({
+        id: 987,
+        workflow_id: 42,
+        event: "workflow_dispatch",
+        head_sha: "a".repeat(40),
+        created_at: new Date().toISOString(),
+      });
+    vi.mocked(importRun).mockResolvedValue({ sha: "a".repeat(40) } as never);
+    const result = await reconcileDispatch(projectId, d.id, 987);
+    expect(result.dispatch.githubRunId).toBe(987);
+    expect(result.dispatch.resolution).toBe("user-associated");
+    expect(result.eligibleAsApprovedRevisionEvidence).toBe(true);
+    expect(
+      vi
+        .mocked(githubRequest)
+        .mock.calls.every((call) => call[2] === undefined),
+    ).toBe(true);
+  });
+  it("acknowledging uncertainty does not claim rejection or rerun", async () => {
+    const d = await Dispatch.create({
+      projectId,
+      key: "dismiss",
+      workflowId: "test.yml",
+      ref: "main",
+      sha: "a".repeat(40),
+      status: "unknown",
+    });
+    const result = await dismissDispatch(projectId, d.id);
+    expect(result.dispatch.status).toBe("unknown");
+    expect(result.dispatch.resolution).toBe("user-dismissed");
   });
 });

@@ -14,6 +14,8 @@ const schema = new Schema(
     },
     githubRunId: Number,
     errorCode: String,
+    resolution: { type: String, enum: ["user-associated", "user-dismissed"] },
+    resolvedAt: Date,
   },
   { timestamps: true },
 );

@@ -12,11 +12,18 @@ export async function identityAccount(identity: VerifiedIdentity) {
     providerSubject: identity.subject,
   };
   try {
-    return await User.findOneAndUpdate(
+    const user = await User.findOneAndUpdate(
       key,
       { $setOnInsert: { ...key, email: identity.email, name: identity.name } },
       { new: true, upsert: true, runValidators: true },
     );
+    if (user?.deletingAt)
+      throw new HttpError(
+        403,
+        "ACCOUNT_DELETING",
+        "Account deletion is pending",
+      );
+    return user;
   } catch (error) {
     if ((error as { code?: number }).code !== 11000) throw error;
     const concurrent = await User.findOne(key);

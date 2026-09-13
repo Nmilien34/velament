@@ -1,3 +1,4 @@
+import { requestDeletion } from "../services/deletion.service.js";
 import { rateLimit } from "../middleware/rate-limit.js";
 import {
   projectStatus,
@@ -16,7 +17,12 @@ import {
   workflowJobs,
   cancelWorkflow,
 } from "../services/workflow.service.js";
-import { dispatch, refreshDispatch } from "../services/dispatch.service.js";
+import {
+  dispatch,
+  refreshDispatch,
+  reconcileDispatch,
+  dismissDispatch,
+} from "../services/dispatch.service.js";
 import { Dispatch } from "../models/Dispatch.js";
 import { Job } from "../models/Job.js";
 import { Activity } from "../models/Activity.js";
@@ -39,6 +45,8 @@ import { Pin } from "../models/Pin.js";
 import { Investigation } from "../models/Investigation.js";
 import { revision } from "../services/project.service.js";
 import { HttpError } from "../utils/errors.js";
+const listPage = (value: unknown) =>
+  z.coerce.number().int().min(1).max(10000).default(1).parse(value);
 export const api = Router();
 api.use(authenticate);
 api.use(rateLimit("api-read-write", 120, 60000));
@@ -55,12 +63,32 @@ api.get("/projects", listProjects);
 api.post("/projects", createProject);
 api.post("/projects/:projectId/restore", async (req, res) => {
   const project = await Project.findOneAndUpdate(
-    { _id: objectId.parse(req.params.projectId), userId: res.locals.userId },
+    {
+      _id: objectId.parse(req.params.projectId),
+      userId: res.locals.userId,
+      deletingAt: null,
+    },
     { $unset: { archivedAt: 1 } },
     { new: true },
   );
   if (!project) throw new HttpError(404, "NOT_FOUND", "Project not found");
   res.json({ data: project });
+});
+api.delete("/projects/:projectId/permanent", async (req, res) => {
+  z.object({ confirm: z.literal("DELETE PROJECT") })
+    .strict()
+    .parse(req.body);
+  const deletion = await requestDeletion(
+    res.locals.userId,
+    objectId.parse(req.params.projectId),
+  );
+  res.status(202).json({
+    data: {
+      id: deletion!.id,
+      status: "deletion-pending",
+      dueAt: deletion!.dueAt,
+    },
+  });
 });
 api.use("/projects/:projectId", projectAccess);
 api.get("/projects/:projectId/status", async (_req, res) => {
@@ -119,14 +147,23 @@ api.get(
     res.json({ data: file });
   },
 );
-api.get("/projects/:projectId/features", async (_req, res) =>
+api.get("/projects/:projectId/features", async (req, res) =>
   res.json({
     data: await Feature.find({
       projectId: res.locals.projectId,
-      archivedAt: { $exists: false },
+      archivedAt:
+        z
+          .enum(["active", "archived"])
+          .default("active")
+          .parse(req.query.status) === "archived"
+          ? { $type: "date" }
+          : null,
     })
       .sort({ _id: -1 })
+      .skip((listPage(req.query.page) - 1) * 100)
       .limit(100),
+    page: listPage(req.query.page),
+    pageSize: 100,
   }),
 );
 async function validatedFeature(projectId: string, body: unknown) {
@@ -156,6 +193,7 @@ api.put("/projects/:projectId/features/:id", async (req, res) => {
       _id: objectId.parse(req.params.id),
       projectId: res.locals.projectId,
       version,
+      archivedAt: null,
     },
     { $set: input, $inc: { version: 1 } },
     { new: true, runValidators: true },
@@ -173,6 +211,7 @@ api.put("/projects/:projectId/features/:id/pin", async (req, res) => {
   const f = await Feature.findOne({
     _id: objectId.parse(req.params.id),
     projectId: res.locals.projectId,
+    archivedAt: null,
   });
   if (!f) throw new HttpError(404, "NOT_FOUND", "Feature not found");
   const r = await revision(res.locals.projectId, input.revisionId);
@@ -210,9 +249,22 @@ api.put("/projects/:projectId/features/:id/pin", async (req, res) => {
     ),
   });
 });
-api.get("/projects/:projectId/pins", async (_req, res) =>
+api.get("/projects/:projectId/pins", async (req, res) =>
   res.json({
-    data: await Pin.find({ projectId: res.locals.projectId }).limit(100),
+    data: await Pin.find({
+      projectId: res.locals.projectId,
+      featureId: {
+        $in: await Feature.find({
+          projectId: res.locals.projectId,
+          archivedAt: null,
+        }).distinct("_id"),
+      },
+    })
+      .sort({ _id: -1 })
+      .skip((listPage(req.query.page) - 1) * 100)
+      .limit(100),
+    page: listPage(req.query.page),
+    pageSize: 100,
   }),
 );
 api.delete("/projects/:projectId/features/:id/pin", async (req, res) => {
@@ -282,12 +334,15 @@ api.get("/projects/:projectId/investigations/:id/graph", async (req, res) => {
     ),
   });
 });
-api.get("/projects/:projectId/investigations", async (_req, res) =>
+api.get("/projects/:projectId/investigations", async (req, res) =>
   res.json({
     data: await Investigation.find({ projectId: res.locals.projectId })
       .select("-text -prompt")
       .sort({ _id: -1 })
+      .skip((listPage(req.query.page) - 1) * 100)
       .limit(100),
+    page: listPage(req.query.page),
+    pageSize: 100,
   }),
 );
 api.get("/projects/:projectId/investigations/:id", async (req, res) => {
@@ -336,11 +391,14 @@ api.post("/projects/:projectId/runs/import", async (req, res) => {
     .parse(req.body);
   res.json({ data: await importRun(res.locals.projectId, input.githubRunId) });
 });
-api.get("/projects/:projectId/runs", async (_req, res) =>
+api.get("/projects/:projectId/runs", async (req, res) =>
   res.json({
     data: await TestRun.find({ projectId: res.locals.projectId })
       .sort({ githubRunId: -1 })
+      .skip((listPage(req.query.page) - 1) * 100)
       .limit(100),
+    page: listPage(req.query.page),
+    pageSize: 100,
   }),
 );
 api.put(
@@ -401,12 +459,15 @@ api.patch("/projects/:projectId/investigations/:id", async (req, res) => {
   res.json({ data: i });
 });
 
-api.get("/projects/:projectId/jobs", async (_req, res) =>
+api.get("/projects/:projectId/jobs", async (req, res) =>
   res.json({
     data: await Job.find({ projectId: res.locals.projectId })
       .select("-payload -leaseToken")
       .sort({ createdAt: -1 })
+      .skip((listPage(req.query.page) - 1) * 100)
       .limit(100),
+    page: listPage(req.query.page),
+    pageSize: 100,
   }),
 );
 api.post("/projects/:projectId/jobs/:id/cancel", async (req, res) => {
@@ -416,7 +477,16 @@ api.post("/projects/:projectId/jobs/:id/cancel", async (req, res) => {
       projectId: res.locals.projectId,
       status: { $in: ["queued", "running"] },
     },
-    { $set: { cancelRequested: true } },
+    [
+      {
+        $set: {
+          cancelRequested: true,
+          status: {
+            $cond: [{ $eq: ["$status", "queued"] }, "cancelled", "$status"],
+          },
+        },
+      },
+    ],
     { new: true },
   );
   if (!job)
@@ -427,11 +497,14 @@ api.post("/projects/:projectId/jobs/:id/cancel", async (req, res) => {
     );
   res.json({ data: { id: job.id, status: "cancellation_requested" } });
 });
-api.get("/projects/:projectId/activity", async (_req, res) =>
+api.get("/projects/:projectId/activity", async (req, res) =>
   res.json({
     data: await Activity.find({ projectId: res.locals.projectId })
       .sort({ createdAt: -1 })
+      .skip((listPage(req.query.page) - 1) * 100)
       .limit(100),
+    page: listPage(req.query.page),
+    pageSize: 100,
   }),
 );
 api.post("/projects/:projectId/activity/:id/read", async (req, res) => {
@@ -453,11 +526,14 @@ api.delete("/projects/:projectId", async (_req, res) => {
   res.sendStatus(204);
 });
 
-api.get("/projects/:projectId/dispatches", async (_req, res) =>
+api.get("/projects/:projectId/dispatches", async (req, res) =>
   res.json({
     data: await Dispatch.find({ projectId: res.locals.projectId })
       .sort({ createdAt: -1 })
+      .skip((listPage(req.query.page) - 1) * 100)
       .limit(100),
+    page: listPage(req.query.page),
+    pageSize: 100,
   }),
 );
 api.delete("/projects/:projectId/features/:id", async (req, res) => {
@@ -586,3 +662,31 @@ api.post("/projects/:projectId/jobs/:id/retry", async (req, res) => {
 api.post("/projects/:projectId/connection/refresh", async (req, res) => {
   res.json({ data: await refreshProjectConnection(res.locals.projectId) });
 });
+
+api.post("/projects/:projectId/dispatches/:id/reconcile", async (req, res) => {
+  const input = z
+    .object({ githubRunId: z.number().int().positive() })
+    .strict()
+    .parse(req.body);
+  res.json({
+    data: await reconcileDispatch(
+      res.locals.projectId,
+      objectId.parse(req.params.id),
+      input.githubRunId,
+    ),
+  });
+});
+api.post(
+  "/projects/:projectId/dispatches/:id/acknowledge",
+  async (req, res) => {
+    z.object({ acknowledgeUncertainty: z.literal(true) })
+      .strict()
+      .parse(req.body);
+    res.json({
+      data: await dismissDispatch(
+        res.locals.projectId,
+        objectId.parse(req.params.id),
+      ),
+    });
+  },
+);
