@@ -9,3 +9,8 @@ export type { AccountProfile, SessionSummary } from "./types/auth.js";
 
 export type { FeatureCandidate, FeatureEvidence } from "./types/evidence.js";
 export type { RealityFinding, RealityEvidence } from "./types/reality.js";
+
+export {
+  testReportInput,
+  type TestReportInput,
+} from "./schemas/test-report.js";

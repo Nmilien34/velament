@@ -29,6 +29,7 @@ import { FeatureAssessment } from "../models/FeatureAssessment.js";
 import { revision } from "../services/project.service.js";
 import { discoverCandidates } from "../services/feature-evidence.service.js";
 import {
+  uploadTestReport,
   createAssessment,
   getAssessment,
   associateAssessmentRun,
@@ -200,6 +201,18 @@ featureEvidence.get(
       data: await getAssessment(
         res.locals.projectId,
         objectId.parse(req.params.id),
+      ),
+    });
+  },
+);
+featureEvidence.put(
+  "/projects/:projectId/assessments/:id/test-report",
+  async (req, res) => {
+    res.json({
+      data: await uploadTestReport(
+        res.locals.projectId,
+        objectId.parse(req.params.id),
+        req.body,
       ),
     });
   },

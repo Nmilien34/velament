@@ -1,3 +1,5 @@
+import mongoose from "mongoose";
+import { testReportInput } from "@velament/shared";
 import { Feature } from "../models/Feature.js";
 import { FeatureAssessment } from "../models/FeatureAssessment.js";
 import { TestRun } from "../models/TestRun.js";
@@ -58,7 +60,27 @@ export async function getAssessment(projectId: string, id: string) {
         sha: assessment.sha,
       })
     : null;
+  const report = assessment.testReport;
+  const reportRun = report
+    ? await TestRun.findOne({
+        _id: report.runId,
+        projectId,
+        sha: assessment.sha,
+      })
+    : null;
   return {
+    reportEvidence: report
+      ? {
+          report,
+          stale:
+            !feature ||
+            feature.version !== assessment.featureVersion ||
+            !!feature.archivedAt ||
+            !reportRun ||
+            reportRun.runAttempt !== report.attempt,
+          featureVerification: "not-established",
+        }
+      : null,
     assessment,
     stale: !feature || feature.version !== assessment.featureVersion,
     archived: !!feature?.archivedAt,
@@ -97,5 +119,63 @@ export async function associateAssessmentRun(
   assessment.testRunId = run._id;
   assessment.testRunAttempt = run.runAttempt ?? 1;
   await assessment.save();
+  return getAssessment(projectId, id);
+}
+
+export async function uploadTestReport(
+  projectId: string,
+  id: string,
+  value: unknown,
+) {
+  const input = testReportInput.parse(value);
+  await mongoose.connection.transaction(async (session) => {
+    const assessment = await FeatureAssessment.findOne({
+      _id: id,
+      projectId,
+    }).session(session);
+    if (!assessment)
+      throw new HttpError(404, "NOT_FOUND", "Assessment not found");
+    if (assessment.sha !== input.sha)
+      throw new HttpError(
+        422,
+        "EVIDENCE_MISMATCH",
+        "Report must match assessment commit",
+      );
+    const run = await TestRun.updateOne(
+      {
+        _id: input.runId,
+        projectId,
+        sha: input.sha,
+        runAttempt: input.attempt,
+        status: "completed",
+      },
+      { $inc: { __v: 1 } },
+      { session },
+    );
+    if (!run.matchedCount)
+      throw new HttpError(
+        422,
+        "EVIDENCE_MISMATCH",
+        "Report must match a completed run and its current attempt",
+      );
+    await FeatureAssessment.updateOne(
+      { _id: id, projectId },
+      {
+        $set: {
+          testReport: {
+            ...input,
+            provenance: "user-uploaded",
+            receivedAt: new Date(),
+            outcome: input.tests.some((t) => t.outcome === "failed")
+              ? "failed"
+              : input.tests.every((t) => t.outcome === "passed")
+                ? "passed"
+                : "incomplete",
+          },
+        },
+      },
+      { session },
+    );
+  });
   return getAssessment(projectId, id);
 }

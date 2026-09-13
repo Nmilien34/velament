@@ -202,4 +202,48 @@ describe.skipIf(!uri)("feature assessment flow", () => {
     expect(res.body.data.runEvidence.selectedAttempt).toBe(2);
     expect(res.body.data.runEvidence.stale).toBe(false);
   });
+  it("ingests attempt-scoped user reports without promoting them to verified proof", async () => {
+    const run = await TestRun.findOne({ projectId, githubRunId: 100 });
+    const url = base() + "/assessments/" + assessmentId;
+    const body = {
+      runId: run!.id,
+      attempt: 2,
+      sha: "a".repeat(40),
+      environment: "staging",
+      mockedBoundaries: ["email provider"],
+      tests: [{ name: "Signup sends email", outcome: "passed" }],
+    };
+    expect(
+      (
+        await request(app)
+          .put(url + "/test-report")
+          .set(auth())
+          .send({ ...body, attempt: 1 })
+      ).status,
+    ).toBe(422);
+    const saved = await request(app)
+      .put(url + "/test-report")
+      .set(auth())
+      .send(body);
+    expect(saved.status).toBe(200);
+    expect(saved.body.data.reportEvidence.report.provenance).toBe(
+      "user-uploaded",
+    );
+    expect(saved.body.data.reportEvidence.featureVerification).toBe(
+      "not-established",
+    );
+    expect(saved.body.data.reportEvidence.report.outcome).toBe("passed");
+    expect(
+      (
+        await request(app)
+          .put(url + "/test-report")
+          .set(auth())
+          .send({ ...body, tests: [body.tests[0], body.tests[0]] })
+      ).status,
+    ).toBe(400);
+    await TestRun.updateOne({ _id: run!.id }, { $set: { runAttempt: 3 } });
+    expect(
+      (await request(app).get(url).set(auth())).body.data.reportEvidence.stale,
+    ).toBe(true);
+  });
 });

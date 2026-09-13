@@ -10,6 +10,7 @@ export const FeatureAssessment = model(
       featureVersion: { type: Number, required: true },
       requirement: { type: String, required: true },
       evidence: { type: Schema.Types.Mixed, required: true },
+      testReport: Schema.Types.Mixed,
       testRunId: Schema.Types.ObjectId,
       testRunAttempt: { type: Number, min: 1 },
     },
