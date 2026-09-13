@@ -1,3 +1,4 @@
+import mongoose from "mongoose";
 import { processDeletion } from "./deletion.service.js";
 import { revokeAccess } from "./access.service.js";
 import { randomUUID } from "node:crypto";
@@ -202,30 +203,38 @@ export async function processNextJob(kind?: "analysis" | "webhook") {
       );
       resultId = result?.id;
     } else await webhook(job.payload, job.key);
-    const completed = await Job.updateOne(
-      { _id: job.id, leaseToken, status: "running" },
-      [
-        {
-          $set: {
-            status: { $cond: ["$cancelRequested", "cancelled", "completed"] },
-            ...(resultId ? { resultId: { $literal: resultId } } : {}),
+    await mongoose.connection.transaction(async (session) => {
+      const completed = await Job.updateOne(
+        { _id: job.id, leaseToken, status: "running" },
+        [
+          {
+            $set: {
+              status: { $cond: ["$cancelRequested", "cancelled", "completed"] },
+              ...(resultId ? { resultId: { $literal: resultId } } : {}),
+            },
           },
-        },
-        { $unset: ["leaseUntil", "leaseToken", "errorCode"] },
-      ],
-    );
-    if (completed.matchedCount && job.projectId) {
-      const saved = await Job.findById(job.id);
-      await Activity.create({
-        projectId: job.projectId,
-        kind: "analysis",
-        message:
-          saved?.status === "cancelled"
-            ? "Analysis cancelled; any completed snapshot remains available."
-            : "Analysis completed. Review coverage limitations.",
-        referenceId: resultId,
-      });
-    }
+          { $unset: ["leaseUntil", "leaseToken", "errorCode"] },
+        ],
+        { session },
+      );
+      if (completed.matchedCount && job.projectId) {
+        const saved = await Job.findById(job.id).session(session);
+        await Activity.create(
+          [
+            {
+              projectId: job.projectId,
+              kind: "analysis",
+              message:
+                saved?.status === "cancelled"
+                  ? "Analysis cancelled; any completed snapshot remains available."
+                  : "Analysis completed. Review coverage limitations.",
+              referenceId: resultId,
+            },
+          ],
+          { session },
+        );
+      }
+    });
   } catch (error) {
     const terminal =
       job.attempts >= 3 ||

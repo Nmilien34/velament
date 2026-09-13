@@ -57,6 +57,27 @@ describe.skipIf(!uri)("durable analysis jobs", () => {
     expect(analyze).toHaveBeenCalledTimes(1);
     expect((await Job.findById(a!.id))!.status).toBe("completed");
   });
+  it("rolls back completion when its activity cannot be saved, then recovers", async () => {
+    const job = await enqueueAnalysis(projectId, "activity-failure");
+    vi.mocked(analyze).mockResolvedValue(null);
+    const activityFailure = vi
+      .spyOn(Activity, "create")
+      .mockRejectedValueOnce(new Error("database unavailable"));
+    try {
+      await processNextJob("analysis");
+      expect((await Job.findById(job!.id))?.status).toBe("queued");
+      expect(await Activity.countDocuments({ projectId })).toBe(0);
+      await Job.updateOne(
+        { _id: job!.id },
+        { $set: { availableAt: new Date(0) } },
+      );
+      await processNextJob("analysis");
+      expect((await Job.findById(job!.id))?.status).toBe("completed");
+      expect(await Activity.countDocuments({ projectId })).toBe(1);
+    } finally {
+      activityFailure.mockRestore();
+    }
+  });
   it("queues opt-in pushes only for the tracked branch and deduplicates delivery", async () => {
     await Project.updateOne(
       { _id: projectId },
