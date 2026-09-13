@@ -291,4 +291,17 @@ describe.skipIf(!uri)("feature assessment flow", () => {
       ).status,
     ).toBe(404);
   });
+  it("preserves missing run associations as stale evidence", async () => {
+    await TestRun.deleteMany({ projectId });
+    const response = await request(app)
+      .get(base() + "/assessments/" + assessmentId)
+      .set(auth());
+    expect(response.status).toBe(200);
+    expect(response.body.data.runEvidence.run).toBeNull();
+    expect(response.body.data.runEvidence.stale).toBe(true);
+    expect(response.body.data.runEvidence.staleReasons).toEqual([
+      "run-missing",
+    ]);
+    expect(response.body.data.runEvidence.selectedAttempt).toBe(2);
+  });
 });

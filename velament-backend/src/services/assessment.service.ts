@@ -86,6 +86,13 @@ export async function getAssessment(projectId: string, id: string) {
         staleReasons.push("run-not-completed");
     }
   }
+  const runStaleReasons = !run
+    ? ["run-missing"]
+    : assessment.testRunAttempt == null
+      ? ["attempt-not-recorded"]
+      : assessment.testRunAttempt !== (run.runAttempt ?? 1)
+        ? ["run-attempt-changed"]
+        : [];
   return {
     reportEvidence: report
       ? {
@@ -98,14 +105,13 @@ export async function getAssessment(projectId: string, id: string) {
     assessment,
     stale: !feature || feature.version !== assessment.featureVersion,
     archived: !!feature?.archivedAt,
-    runEvidence: run
+    runEvidence: assessment.testRunId
       ? {
           run,
           coverage: "user-associated",
           selectedAttempt: assessment.testRunAttempt ?? null,
-          stale:
-            assessment.testRunAttempt == null ||
-            assessment.testRunAttempt !== (run.runAttempt ?? 1),
+          stale: runStaleReasons.length > 0,
+          staleReasons: runStaleReasons,
           featureVerification: "not-established",
         }
       : null,
