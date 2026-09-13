@@ -362,8 +362,16 @@ api.post("/projects/:projectId/runs", async (req, res) => {
 
 api.patch("/projects/:projectId", async (req, res) => {
   const input = z
-    .object({ branch: z.string().trim().min(1).max(200) })
+    .object({
+      branch: z.string().trim().min(1).max(200).optional(),
+      analyzeOnPush: z.boolean().optional(),
+    })
     .strict()
+    .refine(
+      (input) =>
+        input.branch !== undefined || input.analyzeOnPush !== undefined,
+      "Provide a setting to update",
+    )
     .parse(req.body);
   const p = await Project.findOneAndUpdate(
     {

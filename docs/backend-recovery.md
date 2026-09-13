@@ -2,6 +2,8 @@
 
 ## Access and worker behavior
 
+Projects default to `analyzeOnPush: false`. Enable with `PATCH /api/projects/:projectId` and `{ "analyzeOnPush": true }`. Push webhooks for the tracked branch enqueue one analysis per delivery/project; disabled, deleted-branch, archived/deleting and unavailable projects are skipped. Analysis reads the branch when executed, not necessarily the historical push commit. Completed analysis compares pins and records source-change activity; this setting does not run GitHub test workflows or establish runtime correctness. Real webhook delivery is required.
+
 GitHub disconnect and authorization revocation increment a durable per-user access generation. Analysis snapshot commits and OAuth callback writes check that generation in a MongoDB transaction. A callback started before revocation must restart. Existing in-progress OAuth states created before this change may need to restart once.
 
 The process runs separate analysis and webhook loops. Repository fetches check cancellation and renew their project/job leases between requests, with a ten-minute source-fetch deadline. One provider request can take up to its existing 15-second timeout before cancellation is observed. This is cooperative cancellation, not instantaneous abortion of an upstream request. Queued cancellations settle without fetching source.

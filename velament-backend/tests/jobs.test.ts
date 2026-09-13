@@ -57,6 +57,29 @@ describe.skipIf(!uri)("durable analysis jobs", () => {
     expect(analyze).toHaveBeenCalledTimes(1);
     expect((await Job.findById(a!.id))!.status).toBe("completed");
   });
+  it("queues opt-in pushes only for the tracked branch and deduplicates delivery", async () => {
+    await Project.updateOne(
+      { _id: projectId },
+      { $set: { installationId: 77, repositoryId: 88, analyzeOnPush: true } },
+    );
+    const event = await Job.create({
+      key: "push-enabled",
+      kind: "webhook",
+      payload: {
+        event: "push",
+        body: {
+          installation: { id: 77 },
+          repository: { id: 88 },
+          ref: "refs/heads/main",
+        },
+      },
+    });
+    await processNextJob("webhook");
+    expect(await Job.countDocuments({ kind: "analysis", projectId })).toBe(1);
+    await Job.updateOne({ _id: event.id }, { $set: { status: "queued" } });
+    await processNextJob("webhook");
+    expect(await Job.countDocuments({ kind: "analysis", projectId })).toBe(1);
+  });
   it("does not announce completion after losing its lease", async () => {
     const job = await enqueueAnalysis(projectId, "lost-lease");
     vi.mocked(analyze).mockImplementationOnce(async () => {
@@ -70,6 +93,41 @@ describe.skipIf(!uri)("durable analysis jobs", () => {
     expect((await Job.findById(job!.id))?.status).toBe("running");
     expect(await Activity.countDocuments({ projectId })).toBe(0);
   });
+  it.each(["disabled", "other-branch", "deleted", "archived"])(
+    "does not auto-analyze %s pushes",
+    async (mode) => {
+      await Project.updateOne(
+        { _id: projectId },
+        {
+          $set: {
+            installationId: 77,
+            repositoryId: 88,
+            analyzeOnPush: mode !== "disabled",
+            archivedAt: mode === "archived" ? new Date() : null,
+          },
+        },
+      );
+      await Job.create({
+        key: "skip-" + mode,
+        kind: "webhook",
+        payload: {
+          event: "push",
+          body: {
+            installation: { id: 77 },
+            repository: { id: 88 },
+            ref: "refs/heads/" + (mode === "other-branch" ? "other" : "main"),
+            deleted: mode === "deleted",
+          },
+        },
+      });
+      await processNextJob("webhook");
+      expect(await Job.countDocuments({ kind: "analysis", projectId })).toBe(0);
+      await Project.updateOne(
+        { _id: projectId },
+        { $unset: { archivedAt: 1 } },
+      );
+    },
+  );
   it("honors cancellation arriving as the completion write begins", async () => {
     const job = await enqueueAnalysis(projectId, "late-cancel");
     const original = Job.updateOne.bind(Job);

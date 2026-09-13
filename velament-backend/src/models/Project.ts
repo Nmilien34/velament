@@ -2,6 +2,7 @@ import { Schema, model } from "mongoose";
 const schema = new Schema(
   {
     deletingAt: Date,
+    analyzeOnPush: { type: Boolean, default: false },
     userId: { type: Schema.Types.ObjectId, required: true, index: true },
     owner: { type: String, required: true },
     repo: { type: String, required: true },

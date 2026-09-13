@@ -41,6 +41,7 @@ async function webhook(payload: unknown, deliveryKey: string) {
           .array(z.object({ id: z.number().int().positive() }))
           .optional(),
         ref: z.string().optional(),
+        deleted: z.boolean().optional(),
         workflow_run: z.object({ id: z.number() }).optional(),
       }),
     })
@@ -73,6 +74,7 @@ async function webhook(payload: unknown, deliveryKey: string) {
   const projects = await Project.find({
     installationId: p.body.installation.id,
     archivedAt: null,
+    deletingAt: null,
   });
   for (const project of projects) {
     if (
@@ -94,6 +96,24 @@ async function webhook(payload: unknown, deliveryKey: string) {
     }
     if (p.body.repository?.id !== project.repositoryId) continue;
     if (p.event === "push" && p.body.ref === "refs/heads/" + project.branch) {
+      if (
+        project.analyzeOnPush &&
+        !p.body.deleted &&
+        project.connectionState !== "unavailable"
+      ) {
+        await Job.findOneAndUpdate(
+          { key: "push-analysis:" + deliveryKey + ":" + project.id },
+          {
+            $setOnInsert: {
+              kind: "analysis",
+              projectId: project.id,
+              status: "queued",
+              requestedBranch: project.branch,
+            },
+          },
+          { upsert: true, new: true, runValidators: true },
+        );
+      }
       await Activity.updateOne(
         { eventKey: deliveryKey + ":" + project.id },
         {
