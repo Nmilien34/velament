@@ -173,6 +173,7 @@ describe.skipIf(!uri)("dispatch recovery", () => {
     const result = await reconcileDispatch(projectId, d.id, 987);
     expect(result.dispatch.githubRunId).toBe(987);
     expect(result.dispatch.resolution).toBe("user-associated");
+    expect(result.recovery).toBe("user-associated");
     expect(result.eligibleAsApprovedRevisionEvidence).toBe(true);
     expect(
       vi

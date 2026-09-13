@@ -137,7 +137,10 @@ export async function refreshDispatch(projectId: string, dispatchId: string) {
     verification:
       run?.sha === record.sha ? "revision-matched" : "revision-mismatch",
     eligibleAsApprovedRevisionEvidence: run?.sha === record.sha,
-    recovery: "provider-run-id" as const,
+    recovery:
+      record.resolution === "user-associated"
+        ? ("user-associated" as const)
+        : ("provider-run-id" as const),
   };
 }
 
