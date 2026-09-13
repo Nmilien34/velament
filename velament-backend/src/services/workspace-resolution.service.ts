@@ -79,14 +79,35 @@ export function workspaceResolver(files: SourceFile[]) {
     let entry: unknown;
     if (Object.hasOwn(target.data, "exports")) {
       const exports = target.data.exports;
-      entry =
-        typeof exports === "string" && subpath === "."
-          ? exports
-          : object(exports) &&
-              Object.keys(exports).every((k) => k.startsWith(".")) &&
-              Object.hasOwn(exports, subpath)
-            ? exports[subpath]
-            : undefined;
+      if (typeof exports === "string" && subpath === ".") entry = exports;
+      else if (
+        object(exports) &&
+        Object.keys(exports).every((k) => k.startsWith("."))
+      ) {
+        if (Object.hasOwn(exports, subpath)) entry = exports[subpath];
+        else {
+          const pattern = Object.keys(exports)
+            .filter((key) => {
+              const parts = key.split("*");
+              return (
+                parts.length === 2 &&
+                subpath.startsWith(parts[0]!) &&
+                subpath.endsWith(parts[1]!) &&
+                subpath.length >= key.length
+              );
+            })
+            .sort(
+              (a, b) => b.indexOf("*") - a.indexOf("*") || b.length - a.length,
+            )[0];
+          if (pattern && typeof exports[pattern] === "string") {
+            const capture = subpath.slice(
+              pattern.indexOf("*"),
+              subpath.length - (pattern.length - pattern.indexOf("*") - 1),
+            );
+            entry = (exports[pattern] as string).replaceAll("*", capture);
+          }
+        }
+      }
       if (typeof entry !== "string" || !entry.startsWith("./")) return [];
     } else {
       // Legacy deep imports and implicit index entry points remain unresolved.

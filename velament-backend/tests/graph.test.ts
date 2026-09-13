@@ -226,3 +226,22 @@ it("does not replace Node builtins with same-named workspace packages", () => {
   files[2] = { ...files[2]!, content: "import 'fs';" };
   expect(buildEdges(files)).toEqual([]);
 });
+it("resolves workspace export patterns while preserving exact blocks", () => {
+  const files = workspaceFiles({ "./*": "./src/*.ts", "./private": null });
+  expect(buildEdges(files).map((e) => e.to)).toEqual([
+    "packages/core/src/utils.ts",
+  ]);
+});
+it("chooses the most specific workspace export pattern and rejects traversal", () => {
+  const files = workspaceFiles({
+    "./*": "./*.ts",
+    "./u*": "./src/u*.ts",
+  });
+  files[2] = {
+    ...files[2]!,
+    content: "import '@app/core/utils'; import '@app/core/../main';",
+  };
+  expect(buildEdges(files).map((e) => e.to)).toEqual([
+    "packages/core/src/utils.ts",
+  ]);
+});
